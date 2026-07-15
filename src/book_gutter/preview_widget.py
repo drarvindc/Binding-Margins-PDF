@@ -7,6 +7,7 @@ from typing import Optional
 import fitz
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from .page_side import PageSide
 from .pdf_transform import BindingSide, target_rect_for_page
 
 
@@ -25,6 +26,7 @@ class PreviewPage:
     title_text: str
     summary_text: str
     is_placeholder: bool = False
+    page_side: PageSide | None = None
 
 
 @dataclass(frozen=True)
@@ -194,8 +196,9 @@ class PagePreviewWidget(QtWidgets.QWidget):
 
         if not page.is_placeholder and state.show_original_position and page.page_index is not None:
             painter.setPen(QtGui.QPen(QtGui.QColor("#c05621"), 2, QtCore.Qt.PenStyle.DashLine))
-            original_rect = target_rect_for_page(page.page_rect, state.scale, 0.0, page.page_index, state.binding_side)
-            painter.drawRoundedRect(self._map_source_rect(page.page_rect, rect, original_rect), 4.0, 4.0)
+            if page.page_side is not None:
+                original_rect = target_rect_for_page(page.page_rect, state.scale, 0.0, page.page_side, state.binding_side)
+                painter.drawRoundedRect(self._map_source_rect(page.page_rect, rect, original_rect), 4.0, 4.0)
 
         self._draw_caption(painter, entry, page, page.page_number == state.active_page_number)
 

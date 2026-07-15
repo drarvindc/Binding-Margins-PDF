@@ -34,6 +34,7 @@ def test_unequal_shifts_are_passed_into_preview_geometry(tmp_path, qapp):
     make_pdf(src)
     window = MainWindow()
     window.load_pdf(src)
+    window.first_page_side_combo.setCurrentIndex(1)
     window.same_shift_check.setChecked(False)
     window.odd_shift_spin.setValue(11.0)
     window.even_shift_spin.setValue(15.0)
@@ -43,12 +44,12 @@ def test_unequal_shifts_are_passed_into_preview_geometry(tmp_path, qapp):
     odd_state = window.preview._state
     assert odd_state is not None
     odd_page = odd_state.pages[0]
-    assert odd_page.target_rect.x0 > odd_page.page_rect.x0
+    assert odd_page.target_rect.x0 < odd_page.page_rect.x0
 
     window.page_spin.setValue(2)
     window.refresh_preview()
     even_state = window.preview._state
     assert even_state is not None
     even_page = even_state.pages[0]
-    assert even_page.target_rect.x0 < even_page.page_rect.x0
+    assert even_page.target_rect.x0 > even_page.page_rect.x0
     window.close()

@@ -24,6 +24,25 @@ def _show_window(window: MainWindow, qapp) -> None:
     qapp.processEvents()
 
 
+def test_first_page_side_setting_flips_preview_labels(tmp_path, qapp):
+    src = tmp_path / "source.pdf"
+    make_pdf(src)
+    window = MainWindow()
+    window.load_pdf(src)
+    _show_window(window, qapp)
+
+    window.page_spin.setValue(1)
+    qapp.processEvents()
+    assert "Computed side: Right / Odd" in window.side_label.text()
+    assert "Current item: Source page 1" in window.current_item_label.text()
+
+    window.first_page_side_combo.setCurrentIndex(1)
+    qapp.processEvents()
+    assert "Computed side: Left / Even" in window.side_label.text()
+    assert "Current item: Source page 1" in window.current_item_label.text()
+    window.close()
+
+
 def test_preview_mode_switch_preserves_active_page(tmp_path, qapp):
     src = tmp_path / "source.pdf"
     make_pdf(src)

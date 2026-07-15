@@ -8,9 +8,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import fitz
 from PySide6 import QtCore, QtWidgets
 
+from book_gutter.document_layout import DocumentLayout, OutputItem, OutputItemKind
 from book_gutter.export_worker import ExportSettings
 from book_gutter.main_window import MainWindow
 from book_gutter.pdf_document import PdfDocument, PdfDocumentError
+from book_gutter.page_side import PageSide
 from book_gutter.pdf_transform import BindingSide, ShiftSettings
 
 
@@ -21,6 +23,22 @@ def make_pdf(path: Path, page_count: int = 3) -> None:
         page.insert_text((40, 40), f"Page {index + 1}")
     doc.save(path)
     doc.close()
+
+
+def make_items(page_count: int, include_final_blank: bool = False) -> tuple[OutputItem, ...]:
+    composition = DocumentLayout().compose([(220.0, 300.0)] * page_count)
+    items = list(composition.items)
+    if include_final_blank:
+        items.append(
+            OutputItem(
+                kind=OutputItemKind.AUTOMATIC_FINAL_BLANK,
+                output_position=len(items) + 1,
+                side=PageSide.RIGHT_ODD if len(items) % 2 == 0 else PageSide.LEFT_EVEN,
+                page_width_pt=items[-1].page_width_pt,
+                page_height_pt=items[-1].page_height_pt,
+            )
+        )
+    return tuple(items)
 
 
 def wait_for_export(window: MainWindow, qapp, timeout_s: float = 5.0) -> None:
@@ -57,8 +75,7 @@ def test_test_export_completion_runs_on_main_thread_and_restores_controls(tmp_pa
         scale=100.0,
         shift_settings=ShiftSettings(5.0, 5.0),
         binding_side=BindingSide.LEFT,
-        page_indices=(0, 1),
-        append_blank_partner=False,
+        items=make_items(2),
     )
     window._start_export(settings, open_folder_after_success=False, test_export=True)
     wait_for_export(window, qapp)
@@ -98,9 +115,7 @@ def test_full_export_completion_runs_on_main_thread_and_restores_controls(tmp_pa
         scale=100.0,
         shift_settings=ShiftSettings(5.0, 5.0),
         binding_side=BindingSide.LEFT,
-        page_indices=(0, 1, 2),
-        append_blank_partner=True,
-        blank_page_count=1,
+        items=make_items(3, include_final_blank=True),
     )
     window._start_export(settings, open_folder_after_success=False, test_export=False)
     wait_for_export(window, qapp)
@@ -131,19 +146,18 @@ def test_export_failure_restores_controls_on_main_thread(tmp_path, qapp, monkeyp
         threads.append(QtCore.QThread.currentThread())
         return QtWidgets.QMessageBox.StandardButton.Ok
 
-    def failing_export_pages(self, *args, **kwargs):
+    def failing_export_items(self, *args, **kwargs):
         raise PdfDocumentError("boom")
 
     monkeypatch.setattr(QtWidgets.QMessageBox, "critical", fake_critical)
-    monkeypatch.setattr(PdfDocument, "export_pages", failing_export_pages)
+    monkeypatch.setattr(PdfDocument, "export_items", failing_export_items)
 
     settings = ExportSettings(
         output_path=out,
         scale=100.0,
         shift_settings=ShiftSettings(5.0, 5.0),
         binding_side=BindingSide.LEFT,
-        page_indices=(0, 1, 2),
-        append_blank_partner=False,
+        items=make_items(3),
     )
     window._start_export(settings, open_folder_after_success=False, test_export=False)
     wait_for_export(window, qapp)
@@ -170,19 +184,18 @@ def test_export_cancellation_restores_controls_on_main_thread(tmp_path, qapp, mo
     def fake_show_message(self, message, timeout=0):
         threads.append(QtCore.QThread.currentThread())
 
-    def cancelled_export_pages(self, *args, **kwargs):
+    def cancelled_export_items(self, *args, **kwargs):
         raise PdfDocumentError("Export cancelled.")
 
     monkeypatch.setattr(QtWidgets.QStatusBar, "showMessage", fake_show_message)
-    monkeypatch.setattr(PdfDocument, "export_pages", cancelled_export_pages)
+    monkeypatch.setattr(PdfDocument, "export_items", cancelled_export_items)
 
     settings = ExportSettings(
         output_path=out,
         scale=100.0,
         shift_settings=ShiftSettings(5.0, 5.0),
         binding_side=BindingSide.LEFT,
-        page_indices=(0, 1, 2),
-        append_blank_partner=False,
+        items=make_items(3),
     )
     window._start_export(settings, open_folder_after_success=False, test_export=False)
     wait_for_export(window, qapp)
@@ -207,14 +220,14 @@ def test_second_export_is_ignored_while_one_is_active(tmp_path, qapp, monkeypatc
 
     started = threading.Event()
     release = threading.Event()
-    original_export_pages = PdfDocument.export_pages
+    original_export_items = PdfDocument.export_items
 
-    def blocking_export_pages(self, *args, **kwargs):
+    def blocking_export_items(self, *args, **kwargs):
         started.set()
         assert release.wait(5.0)
-        return original_export_pages(self, *args, **kwargs)
+        return original_export_items(self, *args, **kwargs)
 
-    monkeypatch.setattr(PdfDocument, "export_pages", blocking_export_pages)
+    monkeypatch.setattr(PdfDocument, "export_items", blocking_export_items)
     monkeypatch.setattr(QtWidgets.QMessageBox, "information", lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Ok)
 
     first_settings = ExportSettings(
@@ -222,16 +235,14 @@ def test_second_export_is_ignored_while_one_is_active(tmp_path, qapp, monkeypatc
         scale=100.0,
         shift_settings=ShiftSettings(5.0, 5.0),
         binding_side=BindingSide.LEFT,
-        page_indices=(0, 1, 2),
-        append_blank_partner=False,
+        items=make_items(3),
     )
     second_settings = ExportSettings(
         output_path=out2,
         scale=100.0,
         shift_settings=ShiftSettings(5.0, 5.0),
         binding_side=BindingSide.LEFT,
-        page_indices=(0, 1, 2),
-        append_blank_partner=False,
+        items=make_items(3),
     )
     window._start_export(first_settings, open_folder_after_success=False, test_export=False)
     assert started.wait(5.0) is True

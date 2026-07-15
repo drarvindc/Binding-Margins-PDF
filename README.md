@@ -29,12 +29,14 @@ Book Gutter PDF.bat
 - Opens a PDF by button or drag and drop
 - Shows file name, page count, page dimensions, and mixed-size status
 - Lets you choose left or right binding
+- Lets you choose whether the document starts on the right / odd side or the left / even side
 - Applies a mirrored horizontal shift
 - Lets you switch the preview between Single Page and Facing Pages
 - Keeps scale between 80% and 100%
 - Preserves page order
 - Preserves vector content and selectable text in export
-- Adds a blank final page for odd page counts when enabled
+- Lets you insert intentional blank pages before or after any source page
+- Can append an automatic final blank page for odd-length exports when enabled
 - Exports a print-ready PDF to a new file
 
 ## What it does not do
@@ -104,7 +106,7 @@ If the estimated outer margin is too small, reduce scale below 100% before expor
 ## Export workflow
 
 1. Open a PDF.
-2. Choose binding side, odd and even shift values, scale, preview mode, and whether to add a blank final page.
+2. Choose the document first-page side, binding side, odd and even shift values, scale, preview mode, and whether to add a blank final page.
 3. Review the preview and clipping warnings.
 4. Click **Create Print-Ready PDF**.
 5. Pick a new output filename.
@@ -134,6 +136,8 @@ Two options are available:
 
 The default quick test exports two back-to-back sheets, which gives you four pages to inspect in one go. The middle two pages form a facing spread, so you can check odd and even page movement, front and back, and both binding margins together.
 
+For example, if you test page 9, the app exports pages 7-10 so the middle spread is 8-9.
+
 That pairing is for the test PDF only. The Facing Pages preview is purely visual and does not change export order or test-export sheet selection.
 
 Custom ranges can automatically expand to complete duplex pairs. For example:
@@ -143,7 +147,11 @@ Custom ranges can automatically expand to complete duplex pairs. For example:
 
 If a selected range ends on the final unmatched odd page, a blank partner page is appended so the duplex test still has two sides.
 
-The source-page parity is preserved during test export. Page 10 still uses even-page movement, page 11 still uses odd-page movement, and so on.
+If you insert intentional blank pages in the document, they are preserved in both full export and test export. That means later pages can flip parity after the blank, which is useful when you need a deliberate gutter break or a cover-like opening.
+
+The composed page-side assignment is preserved during test export. Page 10 still uses even-page movement in a normal document, but an inserted blank can shift later pages onto the opposite side.
+
+The app does not read page numbers from artwork. It uses the document order and the configured first-page side to decide which pages are odd or even.
 
 ## Estimated clipping detection
 

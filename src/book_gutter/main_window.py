@@ -15,27 +15,24 @@ from .export_selection import (
     suggest_full_export_filename,
     suggest_test_export_filename,
 )
+from .document_layout import BlankPlacement, DocumentComposition, DocumentLayout, OutputItem, OutputItemKind
 from .export_worker import ExportSettings, ExportWorker
 from .logging_config import configure_logging
 from .pdf_document import PdfDocument, PdfDocumentError
-from .pdf_transform import BindingSide, ShiftSettings, is_odd_page, page_shift_sign, placement_for_page
-from .preview_pairing import (
-    clamp_page_number,
-    format_facing_indicator,
-    next_facing_page_number,
-    previous_facing_page_number,
-    resolve_facing_spread,
-)
+from .page_side import PageSide
+from .pdf_transform import BindingSide, ShiftSettings, page_shift_sign, placement_for_page
+from .preview_pairing import format_facing_indicator, previous_output_position, next_output_position, resolve_facing_spread
 from .preview_widget import PagePreviewWidget, PreviewMode, PreviewPage, PreviewState
 from .units import format_mm, format_pct
 
 
 class TestExportDialog(QtWidgets.QDialog):
-    def __init__(self, current_page: int, page_count: int, parent=None):
+    def __init__(self, current_page: int, composition: DocumentComposition, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Create Test PDF")
         self._current_page = current_page
-        self._page_count = page_count
+        self._composition = composition
+        self._page_count = len(composition.source_page_sizes)
 
         self.current_pair_radio = QtWidgets.QRadioButton("Two duplex sheets - 4 pages")
         self.custom_range_radio = QtWidgets.QRadioButton("Custom page range")
@@ -47,12 +44,12 @@ class TestExportDialog(QtWidgets.QDialog):
         self.summary_label.setWordWrap(True)
 
         self.start_spin = QtWidgets.QSpinBox()
-        self.start_spin.setRange(1, page_count)
+        self.start_spin.setRange(1, self._page_count)
         self.start_spin.setValue(max(1, current_page))
 
         self.end_spin = QtWidgets.QSpinBox()
-        self.end_spin.setRange(1, page_count)
-        self.end_spin.setValue(min(page_count, current_page))
+        self.end_spin.setRange(1, self._page_count)
+        self.end_spin.setValue(min(self._page_count, current_page))
 
         self.expand_check = QtWidgets.QCheckBox("Expand range to complete duplex page pairs")
         self.expand_check.setChecked(True)
@@ -109,9 +106,9 @@ class TestExportDialog(QtWidgets.QDialog):
         self.expand_check.setEnabled(custom)
         if custom:
             try:
-                _, warning = custom_page_range_selection(self.start_spin.value(), self.end_spin.value(), self._page_count, self.expand_check.isChecked())
-                if warning and self.expand_check.isChecked() and self.start_spin.value() % 2 == 0:
-                    warning = warning + " The range will be expanded to include the preceding odd page."
+                _, warning = custom_page_range_selection(self.start_spin.value(), self.end_spin.value(), self._composition, self.expand_check.isChecked())
+                if warning and self.expand_check.isChecked():
+                    warning = warning + " The range will be expanded when possible."
                 self.warning_label.setText(warning or "")
                 self.summary_label.setText("")
                 self.warning_label.setStyleSheet("color: #8a1c1c;" if warning else "color: #2b6f36;")
@@ -120,7 +117,7 @@ class TestExportDialog(QtWidgets.QDialog):
                 self.warning_label.setStyleSheet("color: #8a1c1c;")
                 self.summary_label.setText("")
         else:
-            selection = current_page_pair_selection(self._current_page, self._page_count)
+            selection = current_page_pair_selection(self._current_page, self._composition)
             self.warning_label.setText("")
             self.summary_label.setText(f"Selected: {selection.description}")
             self.warning_label.setStyleSheet("color: #8a1c1c;")
@@ -133,8 +130,8 @@ class TestExportDialog(QtWidgets.QDialog):
 
     def selection(self) -> tuple[ExportSelection, str | None]:
         if self.current_pair_radio.isChecked():
-            return current_page_pair_selection(self._current_page, self._page_count), None
-        return custom_page_range_selection(self.start_spin.value(), self.end_spin.value(), self._page_count, self.expand_check.isChecked())
+            return current_page_pair_selection(self._current_page, self._composition), None
+        return custom_page_range_selection(self.start_spin.value(), self.end_spin.value(), self._composition, self.expand_check.isChecked())
 
     def open_folder_after_success(self) -> bool:
         return self.open_folder_check.isChecked()
@@ -147,11 +144,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setAcceptDrops(True)
         self._log_file = configure_logging()
         self._pdf: PdfDocument | None = None
+        self._layout = DocumentLayout()
+        self._composition: DocumentComposition | None = None
+        self._active_output_position = 1
         self._export_thread: QtCore.QThread | None = None
         self._export_worker: ExportWorker | None = None
         self._current_output_path: Path | None = None
         self._export_open_folder_after_success = False
         self._export_test_export = False
+        self._export_test_selection_description = ""
         self._export_result_handled = False
         self._build_ui()
 
@@ -174,6 +175,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.binding_combo = QtWidgets.QComboBox()
         self.binding_combo.addItems(["Left binding", "Right binding"])
+
+        self.first_page_side_combo = QtWidgets.QComboBox()
+        self.first_page_side_combo.addItems(["Right / Odd side", "Left / Even side"])
+        self.first_page_side_combo.setCurrentIndex(0)
 
         self.same_shift_check = QtWidgets.QCheckBox("Use same shift for odd and even pages")
         self.same_shift_check.setChecked(True)
@@ -205,6 +210,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.show_binding_space_check.setChecked(True)
         self.show_original_check = QtWidgets.QCheckBox("Show original position")
 
+        self.insert_blank_before_button = QtWidgets.QPushButton("Insert blank before")
+        self.insert_blank_after_button = QtWidgets.QPushButton("Insert blank after")
+        self.blank_list = QtWidgets.QListWidget()
+        self.blank_list.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
+        self.remove_blank_button = QtWidgets.QPushButton("Remove selected blank")
+
         self.page_spin = QtWidgets.QSpinBox()
         self.page_spin.setRange(1, 1)
         self.page_spin.setEnabled(False)
@@ -213,7 +224,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.preview = PagePreviewWidget()
 
+        self.current_item_label = QtWidgets.QLabel("-")
         self.current_page_label = QtWidgets.QLabel("-")
+        self.output_position_label = QtWidgets.QLabel("-")
+        self.side_label = QtWidgets.QLabel("-")
         self.shift_mode_label = QtWidgets.QLabel("-")
         self.shift_value_label = QtWidgets.QLabel("-")
         self.shift_direction_label = QtWidgets.QLabel("-")
@@ -225,6 +239,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         form = QtWidgets.QFormLayout()
         form.addRow("Binding side", self.binding_combo)
+        form.addRow("Source PDF page 1 appears on", self.first_page_side_combo)
         form.addRow("", self.same_shift_check)
         form.addRow("Odd-page shift", self.odd_shift_spin)
         form.addRow("Even-page shift", self.even_shift_spin)
@@ -233,6 +248,15 @@ class MainWindow(QtWidgets.QMainWindow):
         form.addRow("", self.show_binding_space_check)
         form.addRow("", self.blank_check)
         form.addRow("", self.show_original_check)
+
+        blank_box = QtWidgets.QGroupBox("Inserted blanks")
+        blank_box_layout = QtWidgets.QVBoxLayout(blank_box)
+        blank_button_row = QtWidgets.QHBoxLayout()
+        blank_button_row.addWidget(self.insert_blank_before_button)
+        blank_button_row.addWidget(self.insert_blank_after_button)
+        blank_button_row.addWidget(self.remove_blank_button)
+        blank_box_layout.addLayout(blank_button_row)
+        blank_box_layout.addWidget(self.blank_list)
 
         nav = QtWidgets.QHBoxLayout()
         nav.addWidget(self.prev_button)
@@ -255,7 +279,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         info = QtWidgets.QVBoxLayout()
         info.addLayout(meta)
+        info.addWidget(self.current_item_label)
         info.addWidget(self.current_page_label)
+        info.addWidget(self.output_position_label)
+        info.addWidget(self.side_label)
         info.addWidget(self.shift_mode_label)
         info.addWidget(self.shift_value_label)
         info.addWidget(self.shift_direction_label)
@@ -267,6 +294,7 @@ class MainWindow(QtWidgets.QMainWindow):
         left = QtWidgets.QVBoxLayout()
         left.addLayout(top)
         left.addLayout(form)
+        left.addWidget(blank_box)
         left.addLayout(nav)
         left.addLayout(info)
         left.addStretch(1)
@@ -288,6 +316,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cancel_button.clicked.connect(self.cancel_export)
         self.open_output_button.clicked.connect(self.open_output_folder)
         self.binding_combo.currentIndexChanged.connect(self.refresh_preview)
+        self.first_page_side_combo.currentIndexChanged.connect(self.refresh_preview)
         self.same_shift_check.toggled.connect(self._sync_shift_controls)
         self.odd_shift_spin.valueChanged.connect(self._odd_shift_changed)
         self.even_shift_spin.valueChanged.connect(self.refresh_preview)
@@ -296,10 +325,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.show_original_check.stateChanged.connect(self.refresh_preview)
         self.preview_mode_combo.currentIndexChanged.connect(self._preview_mode_changed)
         self.show_binding_space_check.stateChanged.connect(self.refresh_preview)
-        self.page_spin.valueChanged.connect(self.refresh_preview)
+        self.page_spin.valueChanged.connect(self._source_page_changed)
+        self.insert_blank_before_button.clicked.connect(self.insert_blank_before_current_page)
+        self.insert_blank_after_button.clicked.connect(self.insert_blank_after_current_page)
+        self.remove_blank_button.clicked.connect(self.remove_selected_blank)
         self.prev_button.clicked.connect(self.previous_page)
         self.next_button.clicked.connect(self.next_page)
-        self.preview.page_clicked.connect(self._set_active_page)
+        self.preview.page_clicked.connect(self._set_active_source_page)
 
         self._sync_shift_controls(self.same_shift_check.isChecked())
         self._update_navigation_labels()
@@ -330,19 +362,128 @@ class MainWindow(QtWidgets.QMainWindow):
         self.refresh_preview()
 
     def _update_navigation_labels(self) -> None:
-        if self._preview_mode() == PreviewMode.FACING_PAGES:
-            self.prev_button.setText("Previous Spread")
-            self.next_button.setText("Next Spread")
-        else:
-            self.prev_button.setText("Previous")
-            self.next_button.setText("Next")
+        self.prev_button.setText("Previous")
+        self.next_button.setText("Next")
 
-    def _set_active_page(self, page_number: int) -> None:
+    def _first_page_side(self) -> PageSide:
+        return PageSide.RIGHT_ODD if self.first_page_side_combo.currentIndex() == 0 else PageSide.LEFT_EVEN
+
+    def _current_composition(self) -> DocumentComposition | None:
+        return self._composition
+
+    def _compose_layout(self) -> DocumentComposition | None:
+        if not self._pdf:
+            self._composition = None
+            return None
+        self._layout = self._layout.with_first_page_side(self._first_page_side())
+        self._composition = self._pdf.compose(self._layout)
+        return self._composition
+
+    def _active_item(self) -> OutputItem | None:
+        if not self._composition:
+            return None
+        if self._active_output_position < 1 or self._active_output_position > len(self._composition.items):
+            return None
+        return self._composition.item_at_output_position(self._active_output_position)
+
+    def _set_active_output_position(self, output_position: int) -> None:
+        if not self._composition:
+            return
+        clamped = max(1, min(output_position, len(self._composition.items)))
+        self._active_output_position = clamped
+        item = self._active_item()
+        if item and item.is_source_page and item.source_page_number is not None and self.page_spin.value() != item.source_page_number:
+            self.page_spin.blockSignals(True)
+            self.page_spin.setValue(item.source_page_number)
+            self.page_spin.blockSignals(False)
+        elif item and item.kind == OutputItemKind.INTENTIONAL_BLANK and item.blank_reference_source_page_number is not None and self.page_spin.value() != item.blank_reference_source_page_number:
+            self.page_spin.blockSignals(True)
+            self.page_spin.setValue(item.blank_reference_source_page_number)
+            self.page_spin.blockSignals(False)
+        self.refresh_preview()
+
+    def _set_active_source_page(self, page_number: int) -> None:
+        if not self._composition:
+            return
+        position = self._composition.output_position_for_source_page_number(page_number)
+        if position is None:
+            return
+        self._set_active_output_position(position)
+
+    def _source_page_changed(self, page_number: int) -> None:
+        self._set_active_source_page(page_number)
+
+    def _blank_label(self, item: OutputItem) -> str:
+        if item.blank_placement == BlankPlacement.BEFORE:
+            return f"Blank before source page {item.blank_reference_source_page_number}"
+        if item.blank_placement == BlankPlacement.AFTER:
+            return f"Blank after source page {item.blank_reference_source_page_number}"
+        if item.kind == OutputItemKind.TEST_PADDING_BLANK:
+            return "Test padding blank"
+        if item.kind == OutputItemKind.AUTOMATIC_FINAL_BLANK:
+            return "Automatic final blank"
+        return "Blank page"
+
+    def _refresh_blank_list(self) -> None:
+        self.blank_list.clear()
+        if not self._composition:
+            return
+        for item in self._composition.items:
+            if item.kind != OutputItemKind.INTENTIONAL_BLANK:
+                continue
+            label = self._blank_label(item)
+            list_item = QtWidgets.QListWidgetItem(label)
+            list_item.setData(QtCore.Qt.ItemDataRole.UserRole, item.blank_insertion_id)
+            self.blank_list.addItem(list_item)
+
+    def _selected_blank_insertion_id(self) -> int | None:
+        item = self.blank_list.currentItem()
+        if item is None:
+            return None
+        value = item.data(QtCore.Qt.ItemDataRole.UserRole)
+        if value is None:
+            return None
+        return int(value)
+
+    def _reselect_current_item(self) -> None:
+        if not self._composition:
+            return
+        current_source = self.page_spin.value()
+        if current_source > 0:
+            position = self._composition.output_position_for_source_page_number(current_source)
+            if position is not None:
+                self._active_output_position = position
+                return
+        self._active_output_position = min(self._active_output_position, len(self._composition.items))
+
+    def _insert_blank(self, placement: str) -> None:
         if not self._pdf:
             return
-        clamped = clamp_page_number(page_number, self._pdf.document.page_count)
-        if self.page_spin.value() != clamped:
-            self.page_spin.setValue(clamped)
+        source_page = self.page_spin.value()
+        if placement == "before":
+            self._layout = self._layout.add_blank_before(source_page)
+        else:
+            self._layout = self._layout.add_blank_after(source_page)
+        self._compose_layout()
+        self._reselect_current_item()
+        self._refresh_blank_list()
+        self.refresh_preview()
+
+    def insert_blank_before_current_page(self) -> None:
+        self._insert_blank("before")
+
+    def insert_blank_after_current_page(self) -> None:
+        self._insert_blank("after")
+
+    def remove_selected_blank(self) -> None:
+        insertion_id = self._selected_blank_insertion_id()
+        if insertion_id is None:
+            return
+        self._layout = self._layout.remove_blank(insertion_id)
+        self._compose_layout()
+        self._reselect_current_item()
+        self._refresh_blank_list()
+        self.refresh_preview()
 
     def _set_status(self, message: str, error: bool = False) -> None:
         self.warning_label.setText(message)
@@ -382,46 +523,74 @@ class MainWindow(QtWidgets.QMainWindow):
         sizes = {f"{round(w / 72.0 * 25.4, 1)} x {round(h / 72.0 * 25.4, 1)} mm" for w, h in info.page_sizes}
         self.page_size_label.setText(", ".join(sorted(sizes)))
         self.mixed_label.setText("Yes" if info.mixed_page_sizes else "No")
+        self._layout = DocumentLayout()
+        self.first_page_side_combo.setCurrentIndex(0)
+        self._composition = self._pdf.compose(self._layout)
+        self._active_output_position = 1
         self.page_spin.setEnabled(True)
         self.page_spin.setMaximum(info.page_count)
         self.page_spin.setValue(1)
+        self._refresh_blank_list()
         self.open_output_button.setEnabled(False)
         self.refresh_preview()
 
     def _selected_binding_side(self) -> BindingSide:
         return BindingSide.LEFT if self.binding_combo.currentIndex() == 0 else BindingSide.RIGHT
 
-    def _current_page_index(self) -> int:
+    def _source_page_count(self) -> int:
+        if not self._composition:
+            return 0
+        return len(self._composition.source_page_sizes)
+
+    def _source_page_index(self) -> int:
         return max(0, self.page_spin.value() - 1)
 
-    def _page_title(self, page_index: int, compact: bool) -> str:
-        if compact:
-            return "Odd / Right page" if is_odd_page(page_index) else "Even / Left page"
-        return f"Page {page_index + 1}"
+    def _page_item_title(self, item: OutputItem) -> str:
+        if item.kind == OutputItemKind.SOURCE_PAGE and item.source_page_number is not None:
+            return f"Source page {item.source_page_number}"
+        if item.kind == OutputItemKind.INTENTIONAL_BLANK:
+            return self._blank_label(item)
+        if item.kind == OutputItemKind.AUTOMATIC_FINAL_BLANK:
+            return "Automatic final blank"
+        if item.kind == OutputItemKind.TEST_PADDING_BLANK:
+            return "Test padding blank"
+        return "Output item"
 
-    def _page_summary_text(
-        self,
-        page_index: int,
-        compact: bool,
-        estimate,
-        transformed,
-        crossing: bool,
-        placement,
-    ) -> str:
-        page_number = page_index + 1
-        if compact:
-            if transformed:
-                outer = min(transformed.left_mm, transformed.right_mm)
-                summary = f"Page {page_number}: estimated outer margin {format_mm(outer)}"
-                if crossing or outer < 3.0 or placement.outer_warning:
-                    summary += " - possible clipping risk"
-                return summary
-            return f"Page {page_number}: no visible content detected"
+    def _preview_summary_text(self, item: OutputItem) -> str:
+        if item.kind == OutputItemKind.SOURCE_PAGE and item.source_page_number is not None:
+            return f"Output {item.output_position} - {item.side.label}"
+        if item.kind == OutputItemKind.INTENTIONAL_BLANK:
+            return f"Output {item.output_position} - {item.side.label}"
+        return f"Output {item.output_position} - {item.side.label}"
 
-        if estimate.margins:
-            original = estimate.margins
-            if transformed:
-                return (
+    def _source_preview_page(self, item: OutputItem, compact: bool) -> tuple[PreviewPage, tuple[str | None, bool]]:
+        if self._pdf is None or item.source_page_index is None:
+            raise RuntimeError("A source page is required for this preview page.")
+        page = self._pdf.document[item.source_page_index]
+        shifts = self._selected_shifts()
+        binding_side = self._selected_binding_side()
+        placement = placement_for_page(page.rect, self.scale_spin.value(), shifts, item.side, binding_side)
+        estimate = estimate_content_bounds(page)
+        transformed = transformed_margins(page, estimate, self.scale_spin.value(), shifts, binding_side, item.side)
+        crossing = transformed_content_crosses_edge(page, estimate, self.scale_spin.value(), shifts, binding_side, item.side)
+        warning_text = None
+        warning_error = False
+        if transformed:
+            outer = min(transformed.left_mm, transformed.right_mm)
+            if crossing:
+                warning_text = "Visible content may be clipped on this page."
+                warning_error = True
+            elif outer < 3.0:
+                warning_text = "Possible clipping risk: estimated outer content margin is below 3 mm."
+                warning_error = True
+            elif placement.outer_warning:
+                warning_text = "The page canvas extends beyond the output edge. Check the preview for actual content clipping."
+        if compact:
+            summary = self._preview_summary_text(item)
+        else:
+            if estimate.margins and transformed:
+                original = estimate.margins
+                summary = (
                     "Original outer margins: "
                     f"left {format_mm(original.left_mm)}, right {format_mm(original.right_mm)}, "
                     f"top {format_mm(original.top_mm)}, bottom {format_mm(original.bottom_mm)}\n"
@@ -429,51 +598,47 @@ class MainWindow(QtWidgets.QMainWindow):
                     f"left {format_mm(transformed.left_mm)}, right {format_mm(transformed.right_mm)}, "
                     f"top {format_mm(transformed.top_mm)}, bottom {format_mm(transformed.bottom_mm)}"
                 )
-            return (
-                "Original outer margins: "
-                f"left {format_mm(original.left_mm)}, right {format_mm(original.right_mm)}, "
-                f"top {format_mm(original.top_mm)}, bottom {format_mm(original.bottom_mm)}\n"
-                "Estimated outer margins after transformation: no visible content detected"
-            )
-        return "Estimated margins: no visible content detected"
+            elif estimate.margins:
+                original = estimate.margins
+                summary = (
+                    "Original outer margins: "
+                    f"left {format_mm(original.left_mm)}, right {format_mm(original.right_mm)}, "
+                    f"top {format_mm(original.top_mm)}, bottom {format_mm(original.bottom_mm)}\n"
+                    "Estimated outer margins after transformation: no visible content detected"
+                )
+            else:
+                summary = "Estimated margins: no visible content detected"
 
-    def _page_warning_info(self, transformed, crossing: bool, placement) -> tuple[str | None, bool]:
-        if not transformed:
-            return None, False
-        outer = min(transformed.left_mm, transformed.right_mm)
-        if crossing:
-            return "Visible content may be clipped on this page.", True
-        if outer < 3.0:
-            return "Possible clipping risk: estimated outer content margin is below 3 mm.", True
-        if placement.outer_warning:
-            return "The page canvas extends beyond the output edge. Check the preview for actual content clipping.", False
-        return None, False
-
-    def _real_preview_page(self, page_index: int, compact: bool) -> tuple[PreviewPage, tuple[str | None, bool]]:
-        page = self._pdf.document[page_index]
-        shifts = self._selected_shifts()
-        binding_side = self._selected_binding_side()
-        placement = placement_for_page(page.rect, self.scale_spin.value(), shifts, page_index, binding_side)
-        estimate = estimate_content_bounds(page)
-        transformed = transformed_margins(page, estimate, self.scale_spin.value(), shifts, binding_side, page_index)
-        crossing = transformed_content_crosses_edge(page, estimate, self.scale_spin.value(), shifts, binding_side, page_index)
-        warning = self._page_warning_info(transformed, crossing, placement)
-        summary = self._page_summary_text(page_index, compact, estimate, transformed, crossing, placement)
-        pixmap = self._pdf.preview_pixmap(page_index, self.scale_spin.value(), shifts, binding_side, self.show_original_check.isChecked())
+        pixmap = self._pdf.preview_pixmap(item.source_page_index, self.scale_spin.value(), shifts, binding_side, self.show_original_check.isChecked())
         preview_page = PreviewPage(
-            page_number=page_index + 1,
-            page_index=page_index,
+            page_number=item.source_page_number,
+            page_index=item.source_page_index,
             page_rect=fitz.Rect(page.rect),
             target_rect=fitz.Rect(placement.target_rect),
             pixmap=pixmap,
-            title_text=self._page_title(page_index, compact),
+            title_text=self._page_item_title(item),
             summary_text=summary,
             is_placeholder=False,
+            page_side=item.side,
         )
-        return preview_page, warning
+        return preview_page, (warning_text, warning_error)
 
-    @staticmethod
-    def _placeholder_preview_page(reference_rect: fitz.Rect, title_text: str, summary_text: str) -> PreviewPage:
+    def _blank_preview_page(self, item: OutputItem) -> PreviewPage:
+        width = item.page_width_pt
+        height = item.page_height_pt
+        return PreviewPage(
+            page_number=None,
+            page_index=None,
+            page_rect=fitz.Rect(0, 0, width, height),
+            target_rect=None,
+            pixmap=None,
+            title_text=self._page_item_title(item),
+            summary_text=self._preview_summary_text(item),
+            is_placeholder=False,
+            page_side=item.side,
+        )
+
+    def _placeholder_preview_page(self, reference_rect: fitz.Rect, title_text: str, summary_text: str) -> PreviewPage:
         return PreviewPage(
             page_number=None,
             page_index=None,
@@ -488,99 +653,152 @@ class MainWindow(QtWidgets.QMainWindow):
     def _preview_note_text(self) -> str:
         notes: list[str] = []
         if self._preview_mode() == PreviewMode.FACING_PAGES:
-            notes.append("Click a visible page to jump to it.")
-        if self._pdf and self.blank_check.isChecked() and self._pdf.document.page_count % 2 == 1:
-            notes.append("Full export will append a blank final page.")
+            notes.append("Click a visible page to jump to its source page.")
+        if self._pdf and self.blank_check.isChecked() and self._composition and len(self._composition.items) % 2 == 1:
+            notes.append("Full export will append an automatic final blank page.")
         return "\n".join(notes)
+
+    def _active_item_description(self, item: OutputItem) -> str:
+        if item.kind == OutputItemKind.SOURCE_PAGE and item.source_page_number is not None:
+            return f"Source page {item.source_page_number}"
+        if item.kind == OutputItemKind.INTENTIONAL_BLANK:
+            placement = "before" if item.blank_placement == BlankPlacement.BEFORE else "after"
+            return f"Intentional blank {placement} source page {item.blank_reference_source_page_number}"
+        if item.kind == OutputItemKind.TEST_PADDING_BLANK:
+            return "Test padding blank"
+        if item.kind == OutputItemKind.AUTOMATIC_FINAL_BLANK:
+            return "Automatic final blank"
+        return "Output item"
 
     def refresh_preview(self, *_args) -> None:
         if not self._pdf:
             self.preview.set_state(None)
+            self.current_item_label.setText("-")
             self.current_page_label.setText("-")
+            self.output_position_label.setText("-")
+            self.side_label.setText("-")
             self.shift_mode_label.setText("-")
             self.shift_value_label.setText("-")
             self.shift_direction_label.setText("-")
             self.scale_label.setText("-")
             self.content_margin_label.setText("Estimated margins: -")
             self._set_status("")
+            self.blank_list.clear()
             return
-        page_count = self._pdf.document.page_count
-        page_index = self._current_page_index()
+
+        composition = self._compose_layout()
+        if composition is None or not composition.items:
+            self.preview.set_state(None)
+            self._set_status("")
+            return
+
+        self._active_output_position = max(1, min(self._active_output_position, len(composition.items)))
+
+        active_item = composition.item_at_output_position(self._active_output_position)
         mode = self._preview_mode()
-        compact = mode == PreviewMode.FACING_PAGES
-        spread_warnings: list[str | None] = []
+        pages: list[PreviewPage] = []
+        warnings: list[tuple[str | None, bool]] = []
 
         if mode == PreviewMode.SINGLE_PAGE:
-            pages = []
-            page, warning_info = self._real_preview_page(page_index, compact=False)
+            if active_item.kind == OutputItemKind.SOURCE_PAGE:
+                page, warning = self._source_preview_page(active_item, compact=False)
+            else:
+                page = self._blank_preview_page(active_item)
+                warning = (None, False)
             pages.append(page)
-            warning_text, warning_error = warning_info
-            page_label = f"Current page: {page_index + 1} ({'odd' if is_odd_page(page_index) else 'even'})"
+            page_label = self._active_item_description(active_item)
         else:
-            spread = resolve_facing_spread(page_index + 1, page_count)
-            pages = []
-            if spread.has_left_page:
-                left_page, left_warning = self._real_preview_page(spread.left_page_number - 1, compact=True)
+            spread = resolve_facing_spread(composition, self._active_output_position)
+            if spread.left_item is not None:
+                if spread.left_item.kind == OutputItemKind.SOURCE_PAGE:
+                    left_page, left_warning = self._source_preview_page(spread.left_item, compact=True)
+                else:
+                    left_page = self._blank_preview_page(spread.left_item)
+                    left_warning = (None, False)
                 pages.append(left_page)
-                spread_warnings.append(left_warning)
+                warnings.append(left_warning)
             else:
-                right_reference = self._pdf.document[spread.right_page_number - 1]
-                pages.append(
-                    self._placeholder_preview_page(
-                        right_reference.rect,
-                        "Inside cover / no facing page",
-                        "No source page on this side.",
-                    )
-                )
-            if spread.has_right_page:
-                right_page, right_warning = self._real_preview_page(spread.right_page_number - 1, compact=True)
-                pages.append(right_page)
-                spread_warnings.append(right_warning)
-            else:
-                left_reference = self._pdf.document[spread.left_page_number - 1]
-                pages.append(
-                    self._placeholder_preview_page(
-                        left_reference.rect,
-                        "Blank / no source page",
-                        "No source page on this side.",
-                    )
-                )
-            page_label = f"Current spread: {format_facing_indicator(spread, page_count)}"
+                ref = spread.right_item
+                if ref is not None:
+                    pages.append(self._placeholder_preview_page(fitz.Rect(0, 0, ref.page_width_pt, ref.page_height_pt), "Inside cover / no facing page", "No source page on this side."))
+                else:
+                    pages.append(self._placeholder_preview_page(fitz.Rect(0, 0, 210, 297), "Inside cover / no facing page", "No source page on this side."))
 
-        active_page_index = page_index
-        active_page = self._pdf.document[active_page_index]
-        shifts = self._selected_shifts()
-        placement = placement_for_page(active_page.rect, self.scale_spin.value(), shifts, active_page_index, self._selected_binding_side())
-        estimate = estimate_content_bounds(active_page)
-        transformed = transformed_margins(active_page, estimate, self.scale_spin.value(), shifts, self._selected_binding_side(), active_page_index)
-        crossing = transformed_content_crosses_edge(active_page, estimate, self.scale_spin.value(), shifts, self._selected_binding_side(), active_page_index)
-        active_warning_text, active_warning_error = self._page_warning_info(transformed, crossing, placement)
-        warning_text = active_warning_text
-        warning_error = active_warning_error
-        if warning_text is None:
-            for message, is_error in spread_warnings:
+            if spread.right_item is not None:
+                if spread.right_item.kind == OutputItemKind.SOURCE_PAGE:
+                    right_page, right_warning = self._source_preview_page(spread.right_item, compact=True)
+                else:
+                    right_page = self._blank_preview_page(spread.right_item)
+                    right_warning = (None, False)
+                pages.append(right_page)
+                warnings.append(right_warning)
+            else:
+                ref = spread.left_item
+                if ref is not None:
+                    pages.append(self._placeholder_preview_page(fitz.Rect(0, 0, ref.page_width_pt, ref.page_height_pt), "Blank / no source page", "No source page on this side."))
+                else:
+                    pages.append(self._placeholder_preview_page(fitz.Rect(0, 0, 210, 297), "Blank / no source page", "No source page on this side."))
+            page_label = f"Current spread: {format_facing_indicator(spread)}"
+
+        if active_item.kind == OutputItemKind.SOURCE_PAGE and active_item.source_page_index is not None:
+            page = self._pdf.document[active_item.source_page_index]
+            shifts = self._selected_shifts()
+            binding_side = self._selected_binding_side()
+            placement = placement_for_page(page.rect, self.scale_spin.value(), shifts, active_item.side, binding_side)
+            estimate = estimate_content_bounds(page)
+            transformed = transformed_margins(page, estimate, self.scale_spin.value(), shifts, binding_side, active_item.side)
+            crossing = transformed_content_crosses_edge(page, estimate, self.scale_spin.value(), shifts, binding_side, active_item.side)
+            outer_warning = None
+            warning_error = False
+            if transformed:
+                outer = min(transformed.left_mm, transformed.right_mm)
+                if crossing:
+                    outer_warning = "Visible content may be clipped on this page."
+                    warning_error = True
+                elif outer < 3.0:
+                    outer_warning = "Possible clipping risk: estimated outer content margin is below 3 mm."
+                    warning_error = True
+                elif placement.outer_warning:
+                    outer_warning = "The page canvas extends beyond the output edge. Check the preview for actual content clipping."
+            warning_text = outer_warning
+            if warning_text is None:
+                for message, is_error in warnings:
+                    if message:
+                        warning_text = message
+                        warning_error = is_error
+                        break
+            self.content_margin_label.setText(self._page_summary_text_from_estimate(active_item, estimate, transformed))
+            shift_direction = "right" if page_shift_sign(active_item.side, self._selected_binding_side()) > 0 else "left"
+            shift_value = format_mm(placement.shift_mm)
+        else:
+            warning_text = None
+            warning_error = False
+            for message, is_error in warnings:
                 if message:
                     warning_text = message
                     warning_error = is_error
                     break
+            self.content_margin_label.setText(self._active_item_description(active_item))
+            shift_direction = "n/a"
+            shift_value = "-"
 
+        self.current_item_label.setText(f"Current item: {self._active_item_description(active_item)}")
         self.current_page_label.setText(page_label)
+        self.output_position_label.setText(f"Output position: {self._active_output_position} of {len(composition.items)}")
+        self.side_label.setText(f"Computed side: {active_item.side.label}")
         self.shift_mode_label.setText(f"Preview mode: {'Facing pages' if mode == PreviewMode.FACING_PAGES else 'Single page'}")
         self.shift_value_label.setText(
-            f"Odd shift: {format_mm(self.odd_shift_spin.value())}, even shift: {format_mm(self.even_shift_spin.value())}, active shift: {format_mm(placement.shift_mm)}"
+            f"Odd shift: {format_mm(self.odd_shift_spin.value())}, even shift: {format_mm(self.even_shift_spin.value())}, active shift: {shift_value}"
         )
-        self.shift_direction_label.setText(f"Shift direction: {'right' if page_shift_sign(active_page_index, self._selected_binding_side()) > 0 else 'left'}")
+        self.shift_direction_label.setText(f"Shift direction: {shift_direction}")
         self.scale_label.setText(f"Scale: {format_pct(self.scale_spin.value(), 1)}")
-        self.content_margin_label.setText("\n".join(page.summary_text for page in pages))
         self._set_status(warning_text or "", warning_error)
 
         state = PreviewState(
             mode=mode,
-            page_count=page_count,
-            active_page_number=page_index + 1,
-            indicator_text=format_facing_indicator(resolve_facing_spread(page_index + 1, page_count), page_count)
-            if mode == PreviewMode.FACING_PAGES
-            else f"Page {page_index + 1} of {page_count}",
+            page_count=len(composition.items),
+            active_page_number=active_item.source_page_number or active_item.blank_reference_source_page_number or 1,
+            indicator_text=page_label if mode == PreviewMode.SINGLE_PAGE else format_facing_indicator(resolve_facing_spread(composition, self._active_output_position)),
             note_text=self._preview_note_text(),
             scale=self.scale_spin.value(),
             binding_side=self._selected_binding_side(),
@@ -590,25 +808,35 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.preview.set_state(state)
 
+    def _page_summary_text_from_estimate(self, item: OutputItem, estimate, transformed) -> str:
+        if item.kind != OutputItemKind.SOURCE_PAGE or estimate.margins is None:
+            return self._active_item_description(item)
+        original = estimate.margins
+        if transformed:
+            return (
+                "Original outer margins: "
+                f"left {format_mm(original.left_mm)}, right {format_mm(original.right_mm)}, "
+                f"top {format_mm(original.top_mm)}, bottom {format_mm(original.bottom_mm)}\n"
+                "Estimated outer margins after transformation: "
+                f"left {format_mm(transformed.left_mm)}, right {format_mm(transformed.right_mm)}, "
+                f"top {format_mm(transformed.top_mm)}, bottom {format_mm(transformed.bottom_mm)}"
+            )
+        return (
+            "Original outer margins: "
+            f"left {format_mm(original.left_mm)}, right {format_mm(original.right_mm)}, "
+            f"top {format_mm(original.top_mm)}, bottom {format_mm(original.bottom_mm)}\n"
+            "Estimated outer margins after transformation: no visible content detected"
+        )
+
     def previous_page(self) -> None:
-        if not self._pdf:
+        if not self._composition:
             return
-        current = self.page_spin.value()
-        if self._preview_mode() == PreviewMode.FACING_PAGES:
-            target = previous_facing_page_number(current, self._pdf.document.page_count)
-        else:
-            target = clamp_page_number(current - 1, self._pdf.document.page_count)
-        self._set_active_page(target)
+        self._set_active_output_position(previous_output_position(self._active_output_position, len(self._composition.items)))
 
     def next_page(self) -> None:
-        if not self._pdf:
+        if not self._composition:
             return
-        current = self.page_spin.value()
-        if self._preview_mode() == PreviewMode.FACING_PAGES:
-            target = next_facing_page_number(current, self._pdf.document.page_count)
-        else:
-            target = clamp_page_number(current + 1, self._pdf.document.page_count)
-        self._set_active_page(target)
+        self._set_active_output_position(next_output_position(self._active_output_position, len(self._composition.items)))
 
     def _export_via_dialog(self, selection, suggested_filename: str, open_folder_after_success: bool) -> None:
         if not self._pdf:
@@ -627,10 +855,9 @@ class MainWindow(QtWidgets.QMainWindow):
             scale=self.scale_spin.value(),
             shift_settings=self._selected_shifts(),
             binding_side=self._selected_binding_side(),
-            page_indices=selection.page_indices,
-            append_blank_partner=selection.append_blank_partner,
-            blank_page_count=selection.blank_page_count,
+            items=selection.items,
         )
+        self._export_test_selection_description = selection.description
         self._start_export(settings, open_folder_after_success, test_export=True)
 
     def export_pdf(self) -> None:
@@ -645,14 +872,26 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._pdf.path.resolve(strict=False) == output_path.resolve(strict=False):
             QtWidgets.QMessageBox.warning(self, "Export", "The output file must be different from the source file.")
             return
+        if not self._composition:
+            return
+        items = list(self._composition.items)
+        if self.blank_check.isChecked() and len(items) % 2 == 1:
+            last_item = items[-1]
+            items.append(
+                OutputItem(
+                    kind=OutputItemKind.AUTOMATIC_FINAL_BLANK,
+                    output_position=len(items) + 1,
+                    side=DocumentLayout.side_for_output_position(len(items) + 1, self._first_page_side()),
+                    page_width_pt=last_item.page_width_pt,
+                    page_height_pt=last_item.page_height_pt,
+                )
+            )
         settings = ExportSettings(
             output_path=output_path,
             scale=self.scale_spin.value(),
             shift_settings=self._selected_shifts(),
             binding_side=self._selected_binding_side(),
-            page_indices=tuple(range(self._pdf.document.page_count)),
-            append_blank_partner=self.blank_check.isChecked() and self._pdf.document.page_count % 2 == 1,
-            blank_page_count=1 if self.blank_check.isChecked() and self._pdf.document.page_count % 2 == 1 else 0,
+            items=tuple(items),
         )
         self._start_export(settings, open_folder_after_success=False, test_export=False)
 
@@ -660,7 +899,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._pdf:
             QtWidgets.QMessageBox.information(self, "Create Test PDF", "Open a PDF first.")
             return
-        dialog = TestExportDialog(self.page_spin.value(), self._pdf.document.page_count, self)
+        if not self._composition:
+            return
+        dialog = TestExportDialog(self.page_spin.value(), self._composition, self)
         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
         selection, warning = dialog.selection()
@@ -710,6 +951,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._export_thread = None
         self._export_open_folder_after_success = False
         self._export_test_export = False
+        self._export_test_selection_description = ""
         self._export_result_handled = False
 
     def _restore_export_controls(self) -> None:
@@ -737,21 +979,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self._restore_export_controls()
         self.open_output_button.setEnabled(True)
         self.statusBar().showMessage("Export complete", 5000)
-        blank_pages_added = getattr(result, "blank_pages_added", 0)
+        intentional_blank_pages_added = getattr(result, "intentional_blank_pages_added", 0)
+        automatic_final_blank_pages_added = getattr(result, "automatic_final_blank_pages_added", 0)
+        test_padding_blank_pages_added = getattr(result, "test_padding_blank_pages_added", 0)
+        total_output_pages = getattr(result, "pages_written", 0)
         if self._export_test_export:
             source_pages = self._format_page_list(tuple(getattr(result, "source_pages_exported", ())))
-            blank_text = str(blank_pages_added)
+            selected_spread = self._export_test_selection_description or "-"
             message = (
                 f"Output: {result.output_path}\n"
+                f"Selected spread: {selected_spread}\n"
                 f"Source pages included: {source_pages}\n"
-                f"Pages written: {result.pages_written}\n"
-                f"Blank pages added: {blank_text}"
+                f"Intentional blanks included: {intentional_blank_pages_added}\n"
+                f"Test-padding blanks added: {test_padding_blank_pages_added}\n"
+                f"Total output pages: {total_output_pages}"
             )
         else:
+            automatic_blank_text = "yes" if automatic_final_blank_pages_added else "no"
             message = (
                 f"Output: {result.output_path}\n"
-                f"Pages written: {result.pages_written}\n"
-                f"Blank pages added: {blank_pages_added}"
+                f"Source pages written: {self._format_page_list(tuple(getattr(result, 'source_pages_exported', ())))}\n"
+                f"Intentional blanks added: {intentional_blank_pages_added}\n"
+                f"Automatic final blank added: {automatic_blank_text}\n"
+                f"Total output pages: {total_output_pages}"
             )
         QtWidgets.QMessageBox.information(self, "Export complete", message)
         if self._export_open_folder_after_success and self._current_output_path is not None:

@@ -6,6 +6,7 @@ from typing import Optional
 import fitz
 import numpy as np
 
+from .page_side import PageSide
 from .pdf_transform import BindingSide, ShiftSpec, normalize_shift_settings, page_shift_mm, page_shift_sign
 from .units import mm_to_points, points_to_mm
 
@@ -62,13 +63,13 @@ def _transformed_content_rect(
     scale: float,
     shift_spec: ShiftSpec,
     binding_side: BindingSide,
-    page_index: int,
+    page_side: PageSide,
 ) -> Optional[fitz.Rect]:
     if not estimate.has_content or estimate.bbox is None:
         return None
 
     normalized = normalize_shift_settings(shift_spec)
-    shift_points = mm_to_points(page_shift_mm(normalized, page_index)) * page_shift_sign(page_index, binding_side)
+    shift_points = mm_to_points(page_shift_mm(normalized, page_side)) * page_shift_sign(page_side, binding_side)
     factor = scale / 100.0
     center_x = page.rect.width / 2.0 + shift_points
     center_y = page.rect.height / 2.0
@@ -86,9 +87,9 @@ def transformed_margins(
     scale: float,
     shift_spec: ShiftSpec,
     binding_side: BindingSide,
-    page_index: int,
+    page_side: PageSide,
 ) -> Optional[ContentMargins]:
-    rect = _transformed_content_rect(page, estimate, scale, shift_spec, binding_side, page_index)
+    rect = _transformed_content_rect(page, estimate, scale, shift_spec, binding_side, page_side)
     if rect is None:
         return None
     return ContentMargins(
@@ -105,9 +106,9 @@ def transformed_content_crosses_edge(
     scale: float,
     shift_spec: ShiftSpec,
     binding_side: BindingSide,
-    page_index: int,
+    page_side: PageSide,
 ) -> bool:
-    rect = _transformed_content_rect(page, estimate, scale, shift_spec, binding_side, page_index)
+    rect = _transformed_content_rect(page, estimate, scale, shift_spec, binding_side, page_side)
     if rect is None:
         return False
     return rect.x0 < page.rect.x0 or rect.y0 < page.rect.y0 or rect.x1 > page.rect.x1 or rect.y1 > page.rect.y1

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from PySide6 import QtCore
 
+from .document_layout import OutputItem
 from .pdf_document import ExportResult, PdfDocument, PdfDocumentError
 from .pdf_transform import BindingSide, ShiftSettings
 
@@ -15,9 +16,7 @@ class ExportSettings:
     scale: float
     shift_settings: ShiftSettings
     binding_side: BindingSide
-    page_indices: tuple[int, ...]
-    append_blank_partner: bool
-    blank_page_count: int = 0
+    items: tuple[OutputItem, ...]
 
 
 class ExportWorker(QtCore.QObject):
@@ -34,14 +33,12 @@ class ExportWorker(QtCore.QObject):
     @QtCore.Slot()
     def run(self) -> None:
         try:
-            result = self._pdf_document.export_pages(
+            result = self._pdf_document.export_items(
                 output_path=self._settings.output_path,
-                page_indices=self._settings.page_indices,
+                items=self._settings.items,
                 scale=self._settings.scale,
                 shift_spec=self._settings.shift_settings,
                 binding_side=self._settings.binding_side,
-                append_blank_partner=self._settings.append_blank_partner,
-                blank_page_count=self._settings.blank_page_count,
                 progress_callback=self.progress_changed.emit,
                 cancel_check=QtCore.QThread.currentThread().isInterruptionRequested,
             )
