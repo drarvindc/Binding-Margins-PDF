@@ -147,6 +147,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._export_thread: QtCore.QThread | None = None
         self._export_worker: ExportWorker | None = None
         self._current_output_path: Path | None = None
+        self._export_open_folder_after_success = False
+        self._export_test_export = False
+        self._export_result_handled = False
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -341,6 +344,14 @@ class MainWindow(QtWidgets.QMainWindow):
     def _set_status(self, message: str, error: bool = False) -> None:
         self.warning_label.setText(message)
         self.warning_label.setStyleSheet("color: #8a1c1c;" if error else "color: #2b6f36;")
+
+    @staticmethod
+    def _assert_gui_thread() -> None:
+        app = QtWidgets.QApplication.instance()
+        if app is None:
+            return
+        if QtCore.QThread.currentThread() != app.thread():
+            raise RuntimeError("Export UI handlers must run on the main Qt thread.")
 
     def _close_pdf(self) -> None:
         if self._pdf:
@@ -654,32 +665,53 @@ class MainWindow(QtWidgets.QMainWindow):
         self._export_via_dialog(selection, suggested_name, dialog.open_folder_after_success())
 
     def _start_export(self, settings: ExportSettings, open_folder_after_success: bool, test_export: bool) -> None:
+        if self._export_thread is not None:
+            return
+        self._export_open_folder_after_success = open_folder_after_success
+        self._export_test_export = test_export
+        self._export_result_handled = False
         self.export_button.setEnabled(False)
         self.test_export_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
-        self._export_thread = QtCore.QThread(self)
+        self._export_thread = QtCore.QThread()
         self._export_worker = ExportWorker(self._pdf, settings)
         self._export_worker.moveToThread(self._export_thread)
         self._export_thread.started.connect(self._export_worker.run)
-        self._export_worker.progress_changed.connect(self._on_export_progress)
-        self._export_worker.finished.connect(lambda result: self._on_export_finished(result, open_folder_after_success, test_export))
-        self._export_worker.failed.connect(self._on_export_failed)
-        self._export_worker.cancelled.connect(self._on_export_cancelled)
+        self._export_worker.progress_changed.connect(self._on_export_progress, QtCore.Qt.ConnectionType.QueuedConnection)
+        self._export_worker.finished.connect(self._on_export_finished, QtCore.Qt.ConnectionType.QueuedConnection)
+        self._export_worker.failed.connect(self._on_export_failed, QtCore.Qt.ConnectionType.QueuedConnection)
+        self._export_worker.cancelled.connect(self._on_export_cancelled, QtCore.Qt.ConnectionType.QueuedConnection)
         self._export_worker.finished.connect(self._export_thread.quit)
         self._export_worker.failed.connect(self._export_thread.quit)
         self._export_worker.cancelled.connect(self._export_thread.quit)
-        self._export_thread.finished.connect(self._cleanup_export)
+        self._export_worker.finished.connect(self._export_worker.deleteLater)
+        self._export_worker.failed.connect(self._export_worker.deleteLater)
+        self._export_worker.cancelled.connect(self._export_worker.deleteLater)
+        self._export_thread.finished.connect(self._on_export_thread_finished, QtCore.Qt.ConnectionType.QueuedConnection)
+        self._export_thread.finished.connect(self._export_thread.deleteLater)
         self._export_thread.start()
 
+    @QtCore.Slot(int, int)
     def _on_export_progress(self, current: int, total: int) -> None:
+        self._assert_gui_thread()
+        if self._export_result_handled:
+            return
         self.statusBar().showMessage(f"Exporting page {current} of {total}")
 
-    def _cleanup_export(self) -> None:
+    @QtCore.Slot()
+    def _on_export_thread_finished(self) -> None:
+        self._assert_gui_thread()
+        self._export_worker = None
+        self._export_thread = None
+        self._export_open_folder_after_success = False
+        self._export_test_export = False
+        self._export_result_handled = False
+
+    def _restore_export_controls(self) -> None:
         self.export_button.setEnabled(True)
         self.test_export_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
-        self._export_worker = None
-        self._export_thread = None
+        self._set_status("")
 
     def _format_page_list(self, pages: tuple[int, ...]) -> str:
         if not pages:
@@ -690,11 +722,17 @@ class MainWindow(QtWidgets.QMainWindow):
             return f"{pages[0]}-{pages[-1]}"
         return ", ".join(str(page) for page in pages)
 
-    def _on_export_finished(self, result: object, open_folder_after_success: bool, test_export: bool) -> None:
+    @QtCore.Slot(object)
+    def _on_export_finished(self, result: object) -> None:
+        self._assert_gui_thread()
+        if self._export_result_handled:
+            return
+        self._export_result_handled = True
         self._current_output_path = getattr(result, "output_path", None)
+        self._restore_export_controls()
         self.open_output_button.setEnabled(True)
         self.statusBar().showMessage("Export complete", 5000)
-        if test_export:
+        if self._export_test_export:
             source_pages = self._format_page_list(tuple(getattr(result, "source_pages_exported", ())))
             blank_text = "Yes" if getattr(result, "blank_partner_added", False) else "No"
             message = (
@@ -710,15 +748,30 @@ class MainWindow(QtWidgets.QMainWindow):
                 f"Blank page added: {'Yes' if result.blank_page_added else 'No'}"
             )
         QtWidgets.QMessageBox.information(self, "Export complete", message)
-        if open_folder_after_success and self._current_output_path is not None:
+        if self._export_open_folder_after_success and self._current_output_path is not None:
             QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(self._current_output_path.parent)))
 
+    @QtCore.Slot(str)
     def _on_export_failed(self, message: str) -> None:
+        self._assert_gui_thread()
+        if self._export_result_handled:
+            return
+        self._export_result_handled = True
+        self._current_output_path = None
+        self._restore_export_controls()
+        self.open_output_button.setEnabled(False)
         logging.exception("Export failed: %s", message)
         QtWidgets.QMessageBox.critical(self, "Export failed", message)
 
+    @QtCore.Slot()
     def _on_export_cancelled(self) -> None:
-        self.cancel_button.setEnabled(False)
+        self._assert_gui_thread()
+        if self._export_result_handled:
+            return
+        self._export_result_handled = True
+        self._current_output_path = None
+        self._restore_export_controls()
+        self.open_output_button.setEnabled(False)
         self.statusBar().showMessage("Export cancelled", 5000)
 
     def cancel_export(self) -> None:
