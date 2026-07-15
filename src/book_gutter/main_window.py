@@ -4,6 +4,7 @@ import logging
 import sys
 from pathlib import Path
 
+import fitz
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from .content_bounds import estimate_content_bounds, transformed_content_crosses_edge, transformed_margins
@@ -18,7 +19,14 @@ from .export_worker import ExportSettings, ExportWorker
 from .logging_config import configure_logging
 from .pdf_document import PdfDocument, PdfDocumentError
 from .pdf_transform import BindingSide, ShiftSettings, is_odd_page, page_shift_sign, placement_for_page
-from .preview_widget import PagePreviewWidget, PreviewState
+from .preview_pairing import (
+    clamp_page_number,
+    format_facing_indicator,
+    next_facing_page_number,
+    previous_facing_page_number,
+    resolve_facing_spread,
+)
+from .preview_widget import PagePreviewWidget, PreviewMode, PreviewPage, PreviewState
 from .units import format_mm, format_pct
 
 
@@ -184,6 +192,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.blank_check = QtWidgets.QCheckBox("Add blank final page")
         self.blank_check.setChecked(True)
+        self.preview_mode_combo = QtWidgets.QComboBox()
+        self.preview_mode_combo.addItems(["Single Page", "Facing Pages"])
+        self.preview_mode_combo.setCurrentIndex(0)
+        self.show_binding_space_check = QtWidgets.QCheckBox("Show binding space")
+        self.show_binding_space_check.setChecked(True)
         self.show_original_check = QtWidgets.QCheckBox("Show original position")
 
         self.page_spin = QtWidgets.QSpinBox()
@@ -210,6 +223,8 @@ class MainWindow(QtWidgets.QMainWindow):
         form.addRow("Odd-page shift", self.odd_shift_spin)
         form.addRow("Even-page shift", self.even_shift_spin)
         form.addRow("Scale", self.scale_spin)
+        form.addRow("Preview mode", self.preview_mode_combo)
+        form.addRow("", self.show_binding_space_check)
         form.addRow("", self.blank_check)
         form.addRow("", self.show_original_check)
 
@@ -273,11 +288,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scale_spin.valueChanged.connect(self.refresh_preview)
         self.blank_check.stateChanged.connect(self.refresh_preview)
         self.show_original_check.stateChanged.connect(self.refresh_preview)
+        self.preview_mode_combo.currentIndexChanged.connect(self._preview_mode_changed)
+        self.show_binding_space_check.stateChanged.connect(self.refresh_preview)
         self.page_spin.valueChanged.connect(self.refresh_preview)
         self.prev_button.clicked.connect(self.previous_page)
         self.next_button.clicked.connect(self.next_page)
+        self.preview.page_clicked.connect(self._set_active_page)
 
         self._sync_shift_controls(self.same_shift_check.isChecked())
+        self._update_navigation_labels()
 
     def _sync_shift_controls(self, same: bool) -> None:
         self.even_shift_spin.setEnabled(not same)
@@ -296,6 +315,28 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _selected_shifts(self) -> ShiftSettings:
         return ShiftSettings(odd_mm=self.odd_shift_spin.value(), even_mm=self.even_shift_spin.value())
+
+    def _preview_mode(self) -> PreviewMode:
+        return PreviewMode.SINGLE_PAGE if self.preview_mode_combo.currentIndex() == 0 else PreviewMode.FACING_PAGES
+
+    def _preview_mode_changed(self, *_args) -> None:
+        self._update_navigation_labels()
+        self.refresh_preview()
+
+    def _update_navigation_labels(self) -> None:
+        if self._preview_mode() == PreviewMode.FACING_PAGES:
+            self.prev_button.setText("Previous Spread")
+            self.next_button.setText("Next Spread")
+        else:
+            self.prev_button.setText("Previous")
+            self.next_button.setText("Next")
+
+    def _set_active_page(self, page_number: int) -> None:
+        if not self._pdf:
+            return
+        clamped = clamp_page_number(page_number, self._pdf.document.page_count)
+        if self.page_spin.value() != clamped:
+            self.page_spin.setValue(clamped)
 
     def _set_status(self, message: str, error: bool = False) -> None:
         self.warning_label.setText(message)
@@ -339,6 +380,105 @@ class MainWindow(QtWidgets.QMainWindow):
     def _current_page_index(self) -> int:
         return max(0, self.page_spin.value() - 1)
 
+    def _page_title(self, page_index: int, compact: bool) -> str:
+        if compact:
+            return "Odd / Right page" if is_odd_page(page_index) else "Even / Left page"
+        return f"Page {page_index + 1}"
+
+    def _page_summary_text(
+        self,
+        page_index: int,
+        compact: bool,
+        estimate,
+        transformed,
+        crossing: bool,
+        placement,
+    ) -> str:
+        page_number = page_index + 1
+        if compact:
+            if transformed:
+                outer = min(transformed.left_mm, transformed.right_mm)
+                summary = f"Page {page_number}: estimated outer margin {format_mm(outer)}"
+                if crossing or outer < 3.0 or placement.outer_warning:
+                    summary += " - possible clipping risk"
+                return summary
+            return f"Page {page_number}: no visible content detected"
+
+        if estimate.margins:
+            original = estimate.margins
+            if transformed:
+                return (
+                    "Original outer margins: "
+                    f"left {format_mm(original.left_mm)}, right {format_mm(original.right_mm)}, "
+                    f"top {format_mm(original.top_mm)}, bottom {format_mm(original.bottom_mm)}\n"
+                    "Estimated outer margins after transformation: "
+                    f"left {format_mm(transformed.left_mm)}, right {format_mm(transformed.right_mm)}, "
+                    f"top {format_mm(transformed.top_mm)}, bottom {format_mm(transformed.bottom_mm)}"
+                )
+            return (
+                "Original outer margins: "
+                f"left {format_mm(original.left_mm)}, right {format_mm(original.right_mm)}, "
+                f"top {format_mm(original.top_mm)}, bottom {format_mm(original.bottom_mm)}\n"
+                "Estimated outer margins after transformation: no visible content detected"
+            )
+        return "Estimated margins: no visible content detected"
+
+    def _page_warning_info(self, transformed, crossing: bool, placement) -> tuple[str | None, bool]:
+        if not transformed:
+            return None, False
+        outer = min(transformed.left_mm, transformed.right_mm)
+        if crossing:
+            return "Visible content may be clipped on this page.", True
+        if outer < 3.0:
+            return "Possible clipping risk: estimated outer content margin is below 3 mm.", True
+        if placement.outer_warning:
+            return "The page canvas extends beyond the output edge. Check the preview for actual content clipping.", False
+        return None, False
+
+    def _real_preview_page(self, page_index: int, compact: bool) -> tuple[PreviewPage, tuple[str | None, bool]]:
+        page = self._pdf.document[page_index]
+        shifts = self._selected_shifts()
+        binding_side = self._selected_binding_side()
+        placement = placement_for_page(page.rect, self.scale_spin.value(), shifts, page_index, binding_side)
+        estimate = estimate_content_bounds(page)
+        transformed = transformed_margins(page, estimate, self.scale_spin.value(), shifts, binding_side, page_index)
+        crossing = transformed_content_crosses_edge(page, estimate, self.scale_spin.value(), shifts, binding_side, page_index)
+        warning = self._page_warning_info(transformed, crossing, placement)
+        summary = self._page_summary_text(page_index, compact, estimate, transformed, crossing, placement)
+        pixmap = self._pdf.preview_pixmap(page_index, self.scale_spin.value(), shifts, binding_side, self.show_original_check.isChecked())
+        preview_page = PreviewPage(
+            page_number=page_index + 1,
+            page_index=page_index,
+            page_rect=fitz.Rect(page.rect),
+            target_rect=fitz.Rect(placement.target_rect),
+            pixmap=pixmap,
+            title_text=self._page_title(page_index, compact),
+            summary_text=summary,
+            is_placeholder=False,
+        )
+        return preview_page, warning
+
+    @staticmethod
+    def _placeholder_preview_page(reference_rect: fitz.Rect, title_text: str, summary_text: str) -> PreviewPage:
+        return PreviewPage(
+            page_number=None,
+            page_index=None,
+            page_rect=fitz.Rect(reference_rect),
+            target_rect=None,
+            pixmap=None,
+            title_text=title_text,
+            summary_text=summary_text,
+            is_placeholder=True,
+        )
+
+    def _preview_note_text(self) -> str:
+        notes: list[str] = []
+        if self._preview_mode() == PreviewMode.FACING_PAGES:
+            notes.append("Click a visible page to jump to it.")
+        if self._pdf and self.blank_check.isChecked() and self._pdf.document.page_count % 2 == 1:
+            notes.append("Full export will append a blank final page.")
+        return "\n".join(notes)
+
     def refresh_preview(self, *_args) -> None:
         if not self._pdf:
             self.preview.set_state(None)
@@ -350,79 +490,111 @@ class MainWindow(QtWidgets.QMainWindow):
             self.content_margin_label.setText("Estimated margins: -")
             self._set_status("")
             return
-
+        page_count = self._pdf.document.page_count
         page_index = self._current_page_index()
-        page = self._pdf.document[page_index]
+        mode = self._preview_mode()
+        compact = mode == PreviewMode.FACING_PAGES
+        spread_warnings: list[str | None] = []
+
+        if mode == PreviewMode.SINGLE_PAGE:
+            pages = []
+            page, warning_info = self._real_preview_page(page_index, compact=False)
+            pages.append(page)
+            warning_text, warning_error = warning_info
+            page_label = f"Current page: {page_index + 1} ({'odd' if is_odd_page(page_index) else 'even'})"
+        else:
+            spread = resolve_facing_spread(page_index + 1, page_count)
+            pages = []
+            if spread.has_left_page:
+                left_page, left_warning = self._real_preview_page(spread.left_page_number - 1, compact=True)
+                pages.append(left_page)
+                spread_warnings.append(left_warning)
+            else:
+                right_reference = self._pdf.document[spread.right_page_number - 1]
+                pages.append(
+                    self._placeholder_preview_page(
+                        right_reference.rect,
+                        "Inside cover / no facing page",
+                        "No source page on this side.",
+                    )
+                )
+            if spread.has_right_page:
+                right_page, right_warning = self._real_preview_page(spread.right_page_number - 1, compact=True)
+                pages.append(right_page)
+                spread_warnings.append(right_warning)
+            else:
+                left_reference = self._pdf.document[spread.left_page_number - 1]
+                pages.append(
+                    self._placeholder_preview_page(
+                        left_reference.rect,
+                        "Blank / no source page",
+                        "No source page on this side.",
+                    )
+                )
+            page_label = f"Current spread: {format_facing_indicator(spread, page_count)}"
+
+        active_page_index = page_index
+        active_page = self._pdf.document[active_page_index]
         shifts = self._selected_shifts()
-        placement = placement_for_page(page.rect, self.scale_spin.value(), shifts, page_index, self._selected_binding_side())
-        estimate = estimate_content_bounds(page)
-        content_after = transformed_margins(page, estimate, self.scale_spin.value(), shifts, self._selected_binding_side(), page_index)
-        crossing = transformed_content_crosses_edge(page, estimate, self.scale_spin.value(), shifts, self._selected_binding_side(), page_index)
+        placement = placement_for_page(active_page.rect, self.scale_spin.value(), shifts, active_page_index, self._selected_binding_side())
+        estimate = estimate_content_bounds(active_page)
+        transformed = transformed_margins(active_page, estimate, self.scale_spin.value(), shifts, self._selected_binding_side(), active_page_index)
+        crossing = transformed_content_crosses_edge(active_page, estimate, self.scale_spin.value(), shifts, self._selected_binding_side(), active_page_index)
+        active_warning_text, active_warning_error = self._page_warning_info(transformed, crossing, placement)
+        warning_text = active_warning_text
+        warning_error = active_warning_error
+        if warning_text is None:
+            for message, is_error in spread_warnings:
+                if message:
+                    warning_text = message
+                    warning_error = is_error
+                    break
 
-        if estimate.margins:
-            original = estimate.margins
-            if content_after:
-                transformed = content_after
-                self.content_margin_label.setText(
-                    "Original outer margins: "
-                    f"left {format_mm(original.left_mm)}, right {format_mm(original.right_mm)}, "
-                    f"top {format_mm(original.top_mm)}, bottom {format_mm(original.bottom_mm)}\n"
-                    "Estimated outer margins after transformation: "
-                    f"left {format_mm(transformed.left_mm)}, right {format_mm(transformed.right_mm)}, "
-                    f"top {format_mm(transformed.top_mm)}, bottom {format_mm(transformed.bottom_mm)}"
-                )
-            else:
-                self.content_margin_label.setText(
-                    "Original outer margins: "
-                    f"left {format_mm(original.left_mm)}, right {format_mm(original.right_mm)}, "
-                    f"top {format_mm(original.top_mm)}, bottom {format_mm(original.bottom_mm)}\n"
-                    "Estimated outer margins after transformation: no visible content detected"
-                )
-        else:
-            self.content_margin_label.setText("Estimated margins: no visible content detected")
-
-        if content_after:
-            outer = min(content_after.left_mm, content_after.right_mm)
-            if crossing:
-                self._set_status("Visible content may be clipped on this page.", True)
-            elif outer < 3.0:
-                self._set_status("Possible clipping risk: estimated outer content margin is below 3 mm.", True)
-            elif placement.outer_warning:
-                self._set_status("The page canvas extends beyond the output edge. Check the preview for actual content clipping.", False)
-            else:
-                self._set_status("")
-        else:
-            self._set_status("")
-
-        pixmap = self._pdf.preview_pixmap(page_index, self.scale_spin.value(), shifts, self._selected_binding_side(), self.show_original_check.isChecked())
-        state = PreviewState(
-            page_index=page_index,
-            page_count=self._pdf.document.page_count,
-            scale=self.scale_spin.value(),
-            shift_mm=placement.shift_mm,
-            binding_side=self._selected_binding_side(),
-            show_original=self.show_original_check.isChecked(),
-            page_rect=page.rect,
-            target_rect=placement.target_rect,
-            pixmap=pixmap,
-            content_estimate=estimate,
-        )
-        self.current_page_label.setText(f"Current page: {page_index + 1} ({'odd' if is_odd_page(page_index) else 'even'})")
-        self.shift_mode_label.setText(f"Shift mode: {'linked' if self.same_shift_check.isChecked() else 'independent'}")
+        self.current_page_label.setText(page_label)
+        self.shift_mode_label.setText(f"Preview mode: {'Facing pages' if mode == PreviewMode.FACING_PAGES else 'Single page'}")
         self.shift_value_label.setText(
             f"Odd shift: {format_mm(self.odd_shift_spin.value())}, even shift: {format_mm(self.even_shift_spin.value())}, active shift: {format_mm(placement.shift_mm)}"
         )
-        self.shift_direction_label.setText(f"Shift direction: {'right' if page_shift_sign(page_index, self._selected_binding_side()) > 0 else 'left'}")
+        self.shift_direction_label.setText(f"Shift direction: {'right' if page_shift_sign(active_page_index, self._selected_binding_side()) > 0 else 'left'}")
         self.scale_label.setText(f"Scale: {format_pct(self.scale_spin.value(), 1)}")
+        self.content_margin_label.setText("\n".join(page.summary_text for page in pages))
+        self._set_status(warning_text or "", warning_error)
+
+        state = PreviewState(
+            mode=mode,
+            page_count=page_count,
+            active_page_number=page_index + 1,
+            indicator_text=format_facing_indicator(resolve_facing_spread(page_index + 1, page_count), page_count)
+            if mode == PreviewMode.FACING_PAGES
+            else f"Page {page_index + 1} of {page_count}",
+            note_text=self._preview_note_text(),
+            scale=self.scale_spin.value(),
+            binding_side=self._selected_binding_side(),
+            show_original_position=self.show_original_check.isChecked(),
+            show_binding_space=self.show_binding_space_check.isChecked(),
+            pages=tuple(pages),
+        )
         self.preview.set_state(state)
 
     def previous_page(self) -> None:
-        if self.page_spin.value() > 1:
-            self.page_spin.setValue(self.page_spin.value() - 1)
+        if not self._pdf:
+            return
+        current = self.page_spin.value()
+        if self._preview_mode() == PreviewMode.FACING_PAGES:
+            target = previous_facing_page_number(current, self._pdf.document.page_count)
+        else:
+            target = clamp_page_number(current - 1, self._pdf.document.page_count)
+        self._set_active_page(target)
 
     def next_page(self) -> None:
-        if self._pdf and self.page_spin.value() < self._pdf.document.page_count:
-            self.page_spin.setValue(self.page_spin.value() + 1)
+        if not self._pdf:
+            return
+        current = self.page_spin.value()
+        if self._preview_mode() == PreviewMode.FACING_PAGES:
+            target = next_facing_page_number(current, self._pdf.document.page_count)
+        else:
+            target = clamp_page_number(current + 1, self._pdf.document.page_count)
+        self._set_active_page(target)
 
     def _export_via_dialog(self, selection, suggested_filename: str, open_folder_after_success: bool) -> None:
         if not self._pdf:

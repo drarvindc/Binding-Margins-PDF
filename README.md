@@ -30,6 +30,7 @@ Book Gutter PDF.bat
 - Shows file name, page count, page dimensions, and mixed-size status
 - Lets you choose left or right binding
 - Applies a mirrored horizontal shift
+- Lets you switch the preview between Single Page and Facing Pages
 - Keeps scale between 80% and 100%
 - Preserves page order
 - Preserves vector content and selectable text in export
@@ -103,10 +104,18 @@ If the estimated outer margin is too small, reduce scale below 100% before expor
 ## Export workflow
 
 1. Open a PDF.
-2. Choose binding side, odd and even shift values, scale, and whether to add a blank final page.
+2. Choose binding side, odd and even shift values, scale, preview mode, and whether to add a blank final page.
 3. Review the preview and clipping warnings.
 4. Click **Create Print-Ready PDF**.
 5. Pick a new output filename.
+
+Facing Pages preview shows the document as an open bound book:
+
+- Page 1 appears alone on the right, with an inside-cover placeholder on the left
+- Even pages are shown on the left and odd pages on the right
+- The preview keeps the original page order and does not reorder pages for export
+
+This preview mode is separate from test export pairing. The preview shows how the book opens visually, while test export still uses physical duplex sheet pairs for quick printer checks.
 
 Suggested output names look like:
 
@@ -124,6 +133,8 @@ Two options are available:
 - Custom page range
 
 The current page pair follows the physical duplex sheet pair for the page you are previewing. For example, page 7 exports pages 7-8, and page 8 also exports pages 7-8.
+
+That pairing is for the test PDF only. The Facing Pages preview is purely visual and does not change export order or test-export sheet selection.
 
 Custom ranges can automatically expand to complete duplex pairs. For example:
 
