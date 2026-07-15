@@ -6,7 +6,7 @@ from typing import Optional
 import fitz
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from .content_bounds import ContentBoundsEstimate, transformed_content_crosses_edge, transformed_margins
+from .content_bounds import ContentBoundsEstimate
 from .pdf_transform import BindingSide, page_shift_sign, target_rect_for_page
 
 
@@ -43,7 +43,6 @@ class PagePreviewWidget(QtWidgets.QWidget):
             return
 
         state = self._state
-        painter.setFont(QtGui.QFont("Segoe UI", 9))
         margin = 18
         available = self.rect().adjusted(margin, margin, -margin, -margin)
         page_width = state.page_rect.width

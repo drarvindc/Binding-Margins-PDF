@@ -18,3 +18,12 @@ def format_mm(value: float, decimals: int = 1) -> str:
 
 def format_pct(value: float, decimals: int = 0) -> str:
     return f"{value:.{decimals}f}%"
+
+
+def format_compact_number(value: float) -> str:
+    text = f"{value:g}"
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def format_mm_compact(value: float) -> str:
+    return f"{format_compact_number(value)}mm"

@@ -6,8 +6,8 @@ from typing import Optional
 import fitz
 import numpy as np
 
-from .units import points_to_mm, mm_to_points
-from .pdf_transform import BindingSide, page_shift_sign
+from .pdf_transform import BindingSide, ShiftSpec, normalize_shift_settings, page_shift_mm, page_shift_sign
+from .units import mm_to_points, points_to_mm
 
 
 @dataclass(frozen=True)
@@ -56,47 +56,58 @@ def estimate_content_bounds(page: fitz.Page, threshold: int = 245, dpi: int = 48
     return ContentBoundsEstimate(bbox=bbox, margins=margins, has_content=True)
 
 
+def _transformed_content_rect(
+    page: fitz.Page,
+    estimate: ContentBoundsEstimate,
+    scale: float,
+    shift_spec: ShiftSpec,
+    binding_side: BindingSide,
+    page_index: int,
+) -> Optional[fitz.Rect]:
+    if not estimate.has_content or estimate.bbox is None:
+        return None
+
+    normalized = normalize_shift_settings(shift_spec)
+    shift_points = mm_to_points(page_shift_mm(normalized, page_index)) * page_shift_sign(page_index, binding_side)
+    factor = scale / 100.0
+    center_x = page.rect.width / 2.0 + shift_points
+    center_y = page.rect.height / 2.0
+    return fitz.Rect(
+        center_x + (estimate.bbox.x0 - page.rect.width / 2.0) * factor,
+        center_y + (estimate.bbox.y0 - page.rect.height / 2.0) * factor,
+        center_x + (estimate.bbox.x1 - page.rect.width / 2.0) * factor,
+        center_y + (estimate.bbox.y1 - page.rect.height / 2.0) * factor,
+    )
+
+
 def transformed_margins(
     page: fitz.Page,
     estimate: ContentBoundsEstimate,
     scale: float,
-    shift_mm: float,
+    shift_spec: ShiftSpec,
     binding_side: BindingSide,
     page_index: int,
 ) -> Optional[ContentMargins]:
-    if not estimate.has_content or estimate.bbox is None:
+    rect = _transformed_content_rect(page, estimate, scale, shift_spec, binding_side, page_index)
+    if rect is None:
         return None
-
-    sign = page_shift_sign(page_index, binding_side)
-    shift_points = mm_to_points(shift_mm) * sign
-    page_width = page.rect.width
-    page_height = page.rect.height
-    center_x = page_width / 2.0 + shift_points
-    center_y = page_height / 2.0
-    factor = scale / 100.0
-    content_left = center_x + (estimate.bbox.x0 - page_width / 2.0) * factor
-    content_right = center_x + (estimate.bbox.x1 - page_width / 2.0) * factor
-    content_top = center_y + (estimate.bbox.y0 - page_height / 2.0) * factor
-    content_bottom = center_y + (estimate.bbox.y1 - page_height / 2.0) * factor
-
     return ContentMargins(
-        left_mm=points_to_mm(content_left - 0.0),
-        right_mm=points_to_mm(page_width - content_right),
-        top_mm=points_to_mm(content_top - 0.0),
-        bottom_mm=points_to_mm(page_height - content_bottom),
+        left_mm=points_to_mm(rect.x0 - page.rect.x0),
+        right_mm=points_to_mm(page.rect.x1 - rect.x1),
+        top_mm=points_to_mm(rect.y0 - page.rect.y0),
+        bottom_mm=points_to_mm(page.rect.y1 - rect.y1),
     )
 
 
-def transformed_content_crosses_edge(page: fitz.Page, estimate: ContentBoundsEstimate, scale: float, shift_mm: float, binding_side: BindingSide, page_index: int) -> bool:
-    if not estimate.has_content or estimate.bbox is None:
+def transformed_content_crosses_edge(
+    page: fitz.Page,
+    estimate: ContentBoundsEstimate,
+    scale: float,
+    shift_spec: ShiftSpec,
+    binding_side: BindingSide,
+    page_index: int,
+) -> bool:
+    rect = _transformed_content_rect(page, estimate, scale, shift_spec, binding_side, page_index)
+    if rect is None:
         return False
-    sign = page_shift_sign(page_index, binding_side)
-    shift_points = mm_to_points(shift_mm) * sign
-    factor = scale / 100.0
-    center_x = page.rect.width / 2.0 + shift_points
-    center_y = page.rect.height / 2.0
-    content_left = center_x + (estimate.bbox.x0 - page.rect.width / 2.0) * factor
-    content_right = center_x + (estimate.bbox.x1 - page.rect.width / 2.0) * factor
-    content_top = center_y + (estimate.bbox.y0 - page.rect.height / 2.0) * factor
-    content_bottom = center_y + (estimate.bbox.y1 - page.rect.height / 2.0) * factor
-    return content_left < 0 or content_top < 0 or content_right > page.rect.width or content_bottom > page.rect.height
+    return rect.x0 < page.rect.x0 or rect.y0 < page.rect.y0 or rect.x1 > page.rect.x1 or rect.y1 > page.rect.y1

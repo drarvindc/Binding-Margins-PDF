@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional, Sequence
 
 import fitz
 
 from .content_bounds import ContentBoundsEstimate, estimate_content_bounds
-from .pdf_transform import BindingSide, placement_for_page
+from .pdf_transform import BindingSide, ShiftSpec, placement_for_page
 
 
 @dataclass(frozen=True)
@@ -31,6 +31,8 @@ class ExportResult:
     output_path: Path
     pages_written: int
     blank_page_added: bool
+    source_pages_exported: tuple[int, ...]
+    blank_partner_added: bool
 
 
 class PdfDocumentError(RuntimeError):
@@ -81,7 +83,7 @@ class PdfDocument:
         page = self._doc[page_index]
         return PageInfo(index=page_index, width_pt=page.rect.width, height_pt=page.rect.height)
 
-    def preview_pixmap(self, page_index: int, scale: float, shift_mm: float, binding_side: BindingSide, show_original: bool, dpi: int = 110) -> fitz.Pixmap:
+    def preview_pixmap(self, page_index: int, scale: float, shift_spec: ShiftSpec, binding_side: BindingSide, show_original: bool, dpi: int = 110) -> fitz.Pixmap:
         page = self._doc[page_index]
         return page.get_pixmap(matrix=fitz.Matrix(dpi / 72.0, dpi / 72.0), alpha=False)
 
@@ -92,42 +94,83 @@ class PdfDocument:
         self,
         output_path: Path,
         scale: float,
-        shift_mm: float,
+        shift_spec: ShiftSpec,
         binding_side: BindingSide,
         add_blank_final_page: bool,
-        progress_callback: Optional[callable] = None,
-        cancel_check: Optional[callable] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> ExportResult:
+        append_blank_partner = add_blank_final_page and self._doc.page_count % 2 == 1
+        return self.export_pages(
+            output_path=output_path,
+            page_indices=tuple(range(self._doc.page_count)),
+            scale=scale,
+            shift_spec=shift_spec,
+            binding_side=binding_side,
+            append_blank_partner=append_blank_partner,
+            progress_callback=progress_callback,
+            cancel_check=cancel_check,
+        )
+
+    def export_pages(
+        self,
+        output_path: Path,
+        page_indices: Sequence[int],
+        scale: float,
+        shift_spec: ShiftSpec,
+        binding_side: BindingSide,
+        append_blank_partner: bool = False,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> ExportResult:
         if self.path.resolve(strict=False) == output_path.resolve(strict=False):
             raise PdfDocumentError("The output file must be different from the source file.")
+        if not page_indices:
+            raise PdfDocumentError("No pages were selected for export.")
+
+        normalized_indices = tuple(page_indices)
+        for page_index in normalized_indices:
+            if page_index < 0 or page_index >= self._doc.page_count:
+                raise PdfDocumentError("The selected page range is outside the source document.")
 
         out_doc = fitz.open()
-        blank_added = False
         temp_output = output_path.with_suffix(output_path.suffix + ".tmp")
+        source_pages_exported = tuple(index + 1 for index in normalized_indices)
+        total_pages = len(normalized_indices) + (1 if append_blank_partner else 0)
         pages_written = 0
+        blank_added = False
         try:
-            for index in range(self._doc.page_count):
+            for out_index, page_index in enumerate(normalized_indices, start=1):
                 if cancel_check and cancel_check():
                     raise PdfDocumentError("Export cancelled.")
-                src_page = self._doc[index]
+                src_page = self._doc[page_index]
                 out_page = out_doc.new_page(width=src_page.rect.width, height=src_page.rect.height)
-                placement = placement_for_page(src_page.rect, scale, shift_mm, index, binding_side)
-                target = placement.target_rect
-                out_page.show_pdf_page(target, self._doc, index, keep_proportion=True, clip=None, rotate=0)
+                placement = placement_for_page(src_page.rect, scale, shift_spec, page_index, binding_side)
+                out_page.show_pdf_page(placement.target_rect, self._doc, page_index, keep_proportion=True, clip=None, rotate=0)
                 self._copy_links(src_page, out_page, placement)
                 pages_written += 1
                 if progress_callback:
-                    progress_callback(index + 1, self._doc.page_count + (1 if add_blank_final_page and self._doc.page_count % 2 == 1 else 0))
+                    progress_callback(out_index, total_pages)
 
-            if add_blank_final_page and self._doc.page_count % 2 == 1:
-                last = self._doc[-1].rect
-                out_doc.new_page(width=last.width, height=last.height)
-                blank_added = True
+            if append_blank_partner:
+                if cancel_check and cancel_check():
+                    raise PdfDocumentError("Export cancelled.")
+                last_page = self._doc[normalized_indices[-1]]
+                out_doc.new_page(width=last_page.rect.width, height=last_page.rect.height)
                 pages_written += 1
+                blank_added = True
+                if progress_callback:
+                    progress_callback(total_pages, total_pages)
 
             out_doc.save(temp_output, garbage=4, deflate=True, clean=True)
             temp_output.replace(output_path)
-            return ExportResult(output_path=output_path, pages_written=pages_written, blank_page_added=blank_added)
+            return ExportResult(
+                output_path=output_path,
+                pages_written=pages_written,
+                blank_page_added=blank_added,
+                source_pages_exported=source_pages_exported,
+                blank_partner_added=blank_added,
+            )
         except Exception:
             if temp_output.exists():
                 temp_output.unlink(missing_ok=True)
