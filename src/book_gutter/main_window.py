@@ -37,9 +37,14 @@ class TestExportDialog(QtWidgets.QDialog):
         self._current_page = current_page
         self._page_count = page_count
 
-        self.current_pair_radio = QtWidgets.QRadioButton("Current page pair")
+        self.current_pair_radio = QtWidgets.QRadioButton("Two duplex sheets - 4 pages")
         self.custom_range_radio = QtWidgets.QRadioButton("Custom page range")
         self.current_pair_radio.setChecked(True)
+
+        self.info_label = QtWidgets.QLabel("Exports two back-to-back sheets. The middle pages form a facing spread for checking both binding margins.")
+        self.info_label.setWordWrap(True)
+        self.summary_label = QtWidgets.QLabel("")
+        self.summary_label.setWordWrap(True)
 
         self.start_spin = QtWidgets.QSpinBox()
         self.start_spin.setRange(1, page_count)
@@ -59,9 +64,6 @@ class TestExportDialog(QtWidgets.QDialog):
         self.warning_label.setWordWrap(True)
         self.warning_label.setStyleSheet("color: #8a1c1c;")
 
-        self.summary_label = QtWidgets.QLabel("")
-        self.summary_label.setWordWrap(True)
-
         pair_layout = QtWidgets.QVBoxLayout()
         pair_layout.addWidget(self.current_pair_radio)
         pair_layout.addWidget(self.custom_range_radio)
@@ -71,6 +73,7 @@ class TestExportDialog(QtWidgets.QDialog):
         range_form.addRow("End page", self.end_spin)
 
         controls = QtWidgets.QVBoxLayout()
+        controls.addWidget(self.info_label)
         controls.addLayout(pair_layout)
         controls.addLayout(range_form)
         controls.addWidget(self.expand_check)
@@ -626,6 +629,7 @@ class MainWindow(QtWidgets.QMainWindow):
             binding_side=self._selected_binding_side(),
             page_indices=selection.page_indices,
             append_blank_partner=selection.append_blank_partner,
+            blank_page_count=selection.blank_page_count,
         )
         self._start_export(settings, open_folder_after_success, test_export=True)
 
@@ -648,6 +652,7 @@ class MainWindow(QtWidgets.QMainWindow):
             binding_side=self._selected_binding_side(),
             page_indices=tuple(range(self._pdf.document.page_count)),
             append_blank_partner=self.blank_check.isChecked() and self._pdf.document.page_count % 2 == 1,
+            blank_page_count=1 if self.blank_check.isChecked() and self._pdf.document.page_count % 2 == 1 else 0,
         )
         self._start_export(settings, open_folder_after_success=False, test_export=False)
 
@@ -732,20 +737,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self._restore_export_controls()
         self.open_output_button.setEnabled(True)
         self.statusBar().showMessage("Export complete", 5000)
+        blank_pages_added = getattr(result, "blank_pages_added", 0)
         if self._export_test_export:
             source_pages = self._format_page_list(tuple(getattr(result, "source_pages_exported", ())))
-            blank_text = "Yes" if getattr(result, "blank_partner_added", False) else "No"
+            blank_text = str(blank_pages_added)
             message = (
                 f"Output: {result.output_path}\n"
+                f"Source pages included: {source_pages}\n"
                 f"Pages written: {result.pages_written}\n"
-                f"Source pages exported: {source_pages}\n"
-                f"Blank partner added: {blank_text}"
+                f"Blank pages added: {blank_text}"
             )
         else:
             message = (
                 f"Output: {result.output_path}\n"
                 f"Pages written: {result.pages_written}\n"
-                f"Blank page added: {'Yes' if result.blank_page_added else 'No'}"
+                f"Blank pages added: {blank_pages_added}"
             )
         QtWidgets.QMessageBox.information(self, "Export complete", message)
         if self._export_open_folder_after_success and self._current_output_path is not None:

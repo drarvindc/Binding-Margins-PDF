@@ -12,6 +12,7 @@ class ExportSelection:
     page_indices: tuple[int, ...]
     source_page_numbers: tuple[int, ...]
     append_blank_partner: bool
+    blank_page_count: int
     description: str
 
 
@@ -29,18 +30,29 @@ def _validate_range(start_page: int, end_page: int, page_count: int) -> None:
 def current_page_pair_selection(current_page: int, page_count: int) -> ExportSelection:
     _validate_range(current_page, current_page, page_count)
     pair_start = current_page if current_page % 2 == 1 else current_page - 1
-    pair_end = pair_start + 1
-    append_blank_partner = pair_end > page_count
-    source_page_numbers = (pair_start,) if append_blank_partner else (pair_start, pair_end)
-    page_indices = tuple(number - 1 for number in source_page_numbers)
-    if append_blank_partner:
-        description = f"Current page pair {pair_start}-{pair_end} plus blank partner"
+    if pair_start + 3 <= page_count:
+        selected_start = pair_start
+        selected_end = pair_start + 3
+    elif page_count % 2 == 0:
+        selected_end = page_count
+        selected_start = max(1, page_count - 3)
     else:
-        description = f"Current page pair {pair_start}-{pair_end}"
+        selected_end = page_count
+        selected_start = max(1, page_count - 2)
+    source_page_numbers = tuple(range(selected_start, selected_end + 1))
+    page_indices = tuple(number - 1 for number in source_page_numbers)
+    blank_page_count = max(0, 4 - len(source_page_numbers))
+    append_blank_partner = blank_page_count > 0
+    description = f"Two duplex sheets {selected_start}-{selected_end}"
+    if blank_page_count == 1:
+        description += " plus 1 blank page"
+    elif blank_page_count > 1:
+        description += f" plus {blank_page_count} blank pages"
     return ExportSelection(
         page_indices=page_indices,
         source_page_numbers=source_page_numbers,
         append_blank_partner=append_blank_partner,
+        blank_page_count=blank_page_count,
         description=description,
     )
 
@@ -74,6 +86,7 @@ def custom_page_range_selection(start_page: int, end_page: int, page_count: int,
             page_indices=page_indices,
             source_page_numbers=source_page_numbers,
             append_blank_partner=append_blank_partner,
+            blank_page_count=1 if append_blank_partner else 0,
             description=description,
         ),
         warning,
@@ -92,10 +105,8 @@ def suggest_test_export_filename(source_path: Path, selection: ExportSelection, 
     stem = source_path.stem
     scale_text = format_compact_number(scale)
     if selection.source_page_numbers:
-        if len(selection.source_page_numbers) == 1 and selection.append_blank_partner:
-            range_text = f"{selection.source_page_numbers[0]}-{selection.source_page_numbers[0] + 1}"
-        elif selection.append_blank_partner:
-            range_text = f"{selection.source_page_numbers[0]}-{selection.source_page_numbers[-1] + 1}"
+        if len(selection.source_page_numbers) == 1:
+            range_text = f"{selection.source_page_numbers[0]}"
         else:
             range_text = f"{selection.source_page_numbers[0]}-{selection.source_page_numbers[-1]}"
     else:

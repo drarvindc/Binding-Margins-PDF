@@ -17,6 +17,7 @@ class ExportSettings:
     binding_side: BindingSide
     page_indices: tuple[int, ...]
     append_blank_partner: bool
+    blank_page_count: int = 0
 
 
 class ExportWorker(QtCore.QObject):
@@ -40,6 +41,7 @@ class ExportWorker(QtCore.QObject):
                 shift_spec=self._settings.shift_settings,
                 binding_side=self._settings.binding_side,
                 append_blank_partner=self._settings.append_blank_partner,
+                blank_page_count=self._settings.blank_page_count,
                 progress_callback=self.progress_changed.emit,
                 cancel_check=QtCore.QThread.currentThread().isInterruptionRequested,
             )

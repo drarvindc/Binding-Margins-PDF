@@ -33,6 +33,7 @@ class ExportResult:
     blank_page_added: bool
     source_pages_exported: tuple[int, ...]
     blank_partner_added: bool
+    blank_pages_added: int = 0
 
 
 class PdfDocumentError(RuntimeError):
@@ -108,6 +109,7 @@ class PdfDocument:
             shift_spec=shift_spec,
             binding_side=binding_side,
             append_blank_partner=append_blank_partner,
+            blank_page_count=1 if append_blank_partner else 0,
             progress_callback=progress_callback,
             cancel_check=cancel_check,
         )
@@ -120,6 +122,7 @@ class PdfDocument:
         shift_spec: ShiftSpec,
         binding_side: BindingSide,
         append_blank_partner: bool = False,
+        blank_page_count: int | None = None,
         progress_callback: Optional[Callable[[int, int], None]] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
     ) -> ExportResult:
@@ -127,6 +130,10 @@ class PdfDocument:
             raise PdfDocumentError("The output file must be different from the source file.")
         if not page_indices:
             raise PdfDocumentError("No pages were selected for export.")
+        if blank_page_count is None:
+            blank_page_count = 1 if append_blank_partner else 0
+        if blank_page_count < 0:
+            raise PdfDocumentError("The selected page range is invalid.")
 
         normalized_indices = tuple(page_indices)
         for page_index in normalized_indices:
@@ -136,9 +143,9 @@ class PdfDocument:
         out_doc = fitz.open()
         temp_output = output_path.with_suffix(output_path.suffix + ".tmp")
         source_pages_exported = tuple(index + 1 for index in normalized_indices)
-        total_pages = len(normalized_indices) + (1 if append_blank_partner else 0)
+        total_pages = len(normalized_indices) + blank_page_count
         pages_written = 0
-        blank_added = False
+        blank_added = 0
         try:
             for out_index, page_index in enumerate(normalized_indices, start=1):
                 if cancel_check and cancel_check():
@@ -152,24 +159,26 @@ class PdfDocument:
                 if progress_callback:
                     progress_callback(out_index, total_pages)
 
-            if append_blank_partner:
-                if cancel_check and cancel_check():
-                    raise PdfDocumentError("Export cancelled.")
+            if blank_page_count:
                 last_page = self._doc[normalized_indices[-1]]
-                out_doc.new_page(width=last_page.rect.width, height=last_page.rect.height)
-                pages_written += 1
-                blank_added = True
-                if progress_callback:
-                    progress_callback(total_pages, total_pages)
+                for blank_index in range(blank_page_count):
+                    if cancel_check and cancel_check():
+                        raise PdfDocumentError("Export cancelled.")
+                    out_doc.new_page(width=last_page.rect.width, height=last_page.rect.height)
+                    pages_written += 1
+                    blank_added += 1
+                    if progress_callback:
+                        progress_callback(len(normalized_indices) + blank_index + 1, total_pages)
 
             out_doc.save(temp_output, garbage=4, deflate=True, clean=True)
             temp_output.replace(output_path)
             return ExportResult(
                 output_path=output_path,
                 pages_written=pages_written,
-                blank_page_added=blank_added,
+                blank_page_added=blank_added > 0,
                 source_pages_exported=source_pages_exported,
-                blank_partner_added=blank_added,
+                blank_partner_added=blank_added > 0,
+                blank_pages_added=blank_added,
             )
         except Exception:
             if temp_output.exists():

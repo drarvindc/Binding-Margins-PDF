@@ -129,10 +129,10 @@ Use **Create Test PDF** when you want a small duplex check instead of a full exp
 
 Two options are available:
 
-- Current page pair
+- Two duplex sheets - 4 pages
 - Custom page range
 
-The current page pair follows the physical duplex sheet pair for the page you are previewing. For example, page 7 exports pages 7-8, and page 8 also exports pages 7-8.
+The default quick test exports two back-to-back sheets, which gives you four pages to inspect in one go. The middle two pages form a facing spread, so you can check odd and even page movement, front and back, and both binding margins together.
 
 That pairing is for the test PDF only. The Facing Pages preview is purely visual and does not change export order or test-export sheet selection.
 

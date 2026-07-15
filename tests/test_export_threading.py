@@ -100,6 +100,7 @@ def test_full_export_completion_runs_on_main_thread_and_restores_controls(tmp_pa
         binding_side=BindingSide.LEFT,
         page_indices=(0, 1, 2),
         append_blank_partner=True,
+        blank_page_count=1,
     )
     window._start_export(settings, open_folder_after_success=False, test_export=False)
     wait_for_export(window, qapp)
