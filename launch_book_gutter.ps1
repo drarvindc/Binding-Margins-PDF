@@ -4,46 +4,35 @@ $projectDir = $PSScriptRoot
 Set-Location $projectDir
 
 $appPath = Join-Path $projectDir 'app.py'
-$candidates = @(
-    (Join-Path $projectDir '.venv\Scripts\python.exe'),
-    'C:\Users\drarv\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'
-)
+$venvPython = Join-Path $projectDir '.venv\Scripts\python.exe'
 
-$pythonExe = $null
-foreach ($candidate in $candidates) {
-    if (Test-Path $candidate) {
-        $pythonExe = (Resolve-Path $candidate).Path
-        break
-    }
-}
+function Show-SetupMessage {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Message
+    )
 
-$pythonArgs = @()
-if (-not $pythonExe) {
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        $pythonExe = 'py'
-        $pythonArgs = @('-3')
-    } elseif (Get-Command python -ErrorAction SilentlyContinue) {
-        $pythonExe = 'python'
-    }
-}
-
-if (-not $pythonExe) {
-    Write-Host 'Could not find a Python interpreter.'
+    Write-Host $Message
+    Write-Host 'Please run setup_book_gutter.bat first.'
     Read-Host 'Press Enter to exit'
     exit 1
 }
 
-try {
-    & $pythonExe @pythonArgs $appPath
-    $exitCode = $LASTEXITCODE
-    if ($exitCode -ne 0) {
-        throw "Book Gutter PDF exited with code $exitCode."
-    }
+if (-not (Test-Path $venvPython)) {
+    Show-SetupMessage 'Book Gutter PDF is not set up yet.'
 }
-catch {
-    Write-Host $_
+
+& $venvPython -c "import fitz; import PySide6; import numpy"
+if ($LASTEXITCODE -ne 0) {
+    Show-SetupMessage 'Book Gutter PDF is set up, but dependencies are missing.'
+}
+
+& $venvPython $appPath
+$exitCode = $LASTEXITCODE
+if ($exitCode -ne 0) {
+    Write-Host "Book Gutter PDF exited with code $exitCode."
     Read-Host 'Press Enter to exit'
-    exit 1
+    exit $exitCode
 }
 
 exit 0

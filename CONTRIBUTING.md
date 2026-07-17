@@ -5,10 +5,13 @@ Thanks for helping improve Book Gutter PDF.
 ## Before you open a change
 
 - Keep changes focused when practical
+- Use the project-local `.venv` for development and tests
+- Run `setup_book_gutter.bat` before running the test suite
 - Run the test suite before opening a pull request
 - Do not modify source PDFs in place
 - Do not make unsupported feature claims
 - Update the README for any user-visible change
+- Do not rely on machine-specific or cached Python runtimes
 
 ## Code and documentation checklist
 

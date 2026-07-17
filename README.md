@@ -177,28 +177,53 @@ Facing Pages preview does not reorder full PDF export.
 - The project is under active development
 - The repository includes an automated pytest suite covering layout, parity, preview, export, and threading behaviour
 
-## Installation
+## Installation and launch
 
-> Installation instructions and packaged releases are coming soon.
+Book Gutter PDF is meant to run from a project-local `.venv` on Windows.
 
-### Run from source
+### First-time setup
 
-Book Gutter PDF is currently meant to be run from source during development.
-
-Recommended steps on Windows:
+Run:
 
 ```powershell
-cd C:\path\to\book_printing
-py -3 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-python app.py
+setup_book_gutter.bat
 ```
 
-You can also launch the app by double-clicking `launch_book_gutter.bat` or by running `launch_book_gutter.ps1`.
+PowerShell alternative:
 
-The launchers prefer a local `.venv` when one is present.
+```powershell
+.\setup_book_gutter.ps1
+```
+
+The setup scripts create `.venv`, install the dependencies from `requirements.txt`, and verify that `fitz`, `PySide6`, and `numpy` import correctly.
+
+Do not rely on Codex's cached Python runtime. The project should use the local `.venv`.
+
+### Normal launch
+
+Run:
+
+```powershell
+Book Gutter PDF.bat
+```
+
+PowerShell alternative:
+
+```powershell
+.\launch_book_gutter.ps1
+```
+
+You can also use `launch_book_gutter.bat`.
+
+The launchers prefer `.venv\Scripts\python.exe` and will tell you to run the setup script if the environment is missing or incomplete.
+
+If you see:
+
+```text
+ModuleNotFoundError: No module named 'fitz'
+```
+
+that means PyMuPDF is not installed in the Python environment being used. The fix is to run `setup_book_gutter.bat`.
 
 ## Quick start
 
@@ -259,6 +284,7 @@ Like many PDF tools, there can be limitations around some annotations, internal 
 - Python 3
 - PySide6
 - PyMuPDF
+- NumPy
 - pytest for development and testing
 
 The code may work on other desktop platforms, but they are not currently documented or tested.
