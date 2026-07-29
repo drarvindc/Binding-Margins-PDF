@@ -203,9 +203,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.blank_check = QtWidgets.QCheckBox("Add blank final page")
         self.blank_check.setChecked(True)
-        self.preview_mode_combo = QtWidgets.QComboBox()
-        self.preview_mode_combo.addItems(["Single Page", "Facing Pages"])
-        self.preview_mode_combo.setCurrentIndex(0)
         self.show_binding_space_check = QtWidgets.QCheckBox("Show binding space")
         self.show_binding_space_check.setChecked(True)
         self.show_original_check = QtWidgets.QCheckBox("Show original position")
@@ -219,10 +216,23 @@ class MainWindow(QtWidgets.QMainWindow):
         self.page_spin = QtWidgets.QSpinBox()
         self.page_spin.setRange(1, 1)
         self.page_spin.setEnabled(False)
-        self.prev_button = QtWidgets.QPushButton("Previous")
-        self.next_button = QtWidgets.QPushButton("Next")
 
         self.preview = PagePreviewWidget()
+        self.preview_mode_group = QtWidgets.QButtonGroup(self)
+        self.preview_mode_group.setExclusive(True)
+        self.preview_mode_single_button = self._create_preview_mode_button("Single Page", self._preview_mode_icon(False))
+        self.preview_mode_facing_button = self._create_preview_mode_button("Facing Pages", self._preview_mode_icon(True))
+        self.preview_mode_group.addButton(self.preview_mode_single_button)
+        self.preview_mode_group.addButton(self.preview_mode_facing_button)
+        self.preview_mode_single_button.clicked.connect(lambda: self._set_preview_mode(PreviewMode.SINGLE_PAGE))
+        self.preview_mode_facing_button.clicked.connect(lambda: self._set_preview_mode(PreviewMode.FACING_PAGES))
+
+        self.prev_button = QtWidgets.QPushButton("Previous")
+        self.next_button = QtWidgets.QPushButton("Next")
+        self.preview_location_label = QtWidgets.QLabel("")
+        self.preview_location_label.setObjectName("previewLocationLabel")
+        self.preview_location_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.preview_location_label.setStyleSheet("color: #5f5a52; font-weight: 600;")
 
         self.current_item_label = QtWidgets.QLabel("-")
         self.current_page_label = QtWidgets.QLabel("-")
@@ -244,7 +254,6 @@ class MainWindow(QtWidgets.QMainWindow):
         form.addRow("Odd-page shift", self.odd_shift_spin)
         form.addRow("Even-page shift", self.even_shift_spin)
         form.addRow("Scale", self.scale_spin)
-        form.addRow("Preview mode", self.preview_mode_combo)
         form.addRow("", self.show_binding_space_check)
         form.addRow("", self.blank_check)
         form.addRow("", self.show_original_check)
@@ -257,11 +266,6 @@ class MainWindow(QtWidgets.QMainWindow):
         blank_button_row.addWidget(self.remove_blank_button)
         blank_box_layout.addLayout(blank_button_row)
         blank_box_layout.addWidget(self.blank_list)
-
-        nav = QtWidgets.QHBoxLayout()
-        nav.addWidget(self.prev_button)
-        nav.addWidget(self.page_spin)
-        nav.addWidget(self.next_button)
 
         top = QtWidgets.QHBoxLayout()
         top.addWidget(self.open_button)
@@ -295,15 +299,39 @@ class MainWindow(QtWidgets.QMainWindow):
         left.addLayout(top)
         left.addLayout(form)
         left.addWidget(blank_box)
-        left.addLayout(nav)
         left.addLayout(info)
         left.addStretch(1)
 
         splitter = QtWidgets.QSplitter()
         left_widget = QtWidgets.QWidget()
         left_widget.setLayout(left)
+        preview_panel = QtWidgets.QWidget()
+        preview_panel_layout = QtWidgets.QVBoxLayout(preview_panel)
+        preview_panel_layout.setContentsMargins(0, 0, 0, 0)
+        preview_panel_layout.setSpacing(10)
+
+        preview_header = QtWidgets.QHBoxLayout()
+        preview_header.setContentsMargins(2, 0, 2, 0)
+        preview_header.setSpacing(8)
+        preview_header.addWidget(self.preview_mode_single_button)
+        preview_header.addWidget(self.preview_mode_facing_button)
+        preview_header.addStretch(1)
+
+        preview_footer = QtWidgets.QHBoxLayout()
+        preview_footer.setContentsMargins(2, 0, 2, 0)
+        preview_footer.setSpacing(8)
+        preview_footer.addWidget(self.prev_button)
+        preview_footer.addWidget(self.page_spin)
+        preview_footer.addWidget(self.preview_location_label)
+        preview_footer.addWidget(self.next_button)
+        preview_footer.addStretch(1)
+
+        preview_panel_layout.addLayout(preview_header)
+        preview_panel_layout.addWidget(self.preview, 1)
+        preview_panel_layout.addLayout(preview_footer)
+
         splitter.addWidget(left_widget)
-        splitter.addWidget(self.preview)
+        splitter.addWidget(preview_panel)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
 
@@ -323,7 +351,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scale_spin.valueChanged.connect(self.refresh_preview)
         self.blank_check.stateChanged.connect(self.refresh_preview)
         self.show_original_check.stateChanged.connect(self.refresh_preview)
-        self.preview_mode_combo.currentIndexChanged.connect(self._preview_mode_changed)
         self.show_binding_space_check.stateChanged.connect(self.refresh_preview)
         self.page_spin.valueChanged.connect(self._source_page_changed)
         self.insert_blank_before_button.clicked.connect(self.insert_blank_before_current_page)
@@ -334,7 +361,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preview.page_clicked.connect(self._set_active_source_page)
 
         self._sync_shift_controls(self.same_shift_check.isChecked())
-        self._update_navigation_labels()
+        self._set_preview_mode(PreviewMode.SINGLE_PAGE)
 
     def _sync_shift_controls(self, same: bool) -> None:
         self.even_shift_spin.setEnabled(not same)
@@ -355,15 +382,56 @@ class MainWindow(QtWidgets.QMainWindow):
         return ShiftSettings(odd_mm=self.odd_shift_spin.value(), even_mm=self.even_shift_spin.value())
 
     def _preview_mode(self) -> PreviewMode:
-        return PreviewMode.SINGLE_PAGE if self.preview_mode_combo.currentIndex() == 0 else PreviewMode.FACING_PAGES
+        return PreviewMode.FACING_PAGES if self.preview_mode_facing_button.isChecked() else PreviewMode.SINGLE_PAGE
 
-    def _preview_mode_changed(self, *_args) -> None:
-        self._update_navigation_labels()
+    def _create_preview_mode_button(self, text: str, icon: QtGui.QIcon) -> QtWidgets.QToolButton:
+        button = QtWidgets.QToolButton()
+        button.setText(text)
+        button.setIcon(icon)
+        button.setIconSize(QtCore.QSize(22, 16))
+        button.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        button.setCheckable(True)
+        button.setAutoRaise(False)
+        button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        button.setObjectName(f"previewMode{''.join(part.title() for part in text.split())}Button")
+        button.setStyleSheet(
+            "QToolButton {"
+            "  padding: 6px 10px;"
+            "  border: 1px solid #c9c1b3;"
+            "  border-radius: 8px;"
+            "  background: #f7f3eb;"
+            "}"
+            "QToolButton:checked {"
+            "  background: #dce8ff;"
+            "  border-color: #4c7df0;"
+            "}"
+        )
+        return button
+
+    def _preview_mode_icon(self, facing: bool) -> QtGui.QIcon:
+        pixmap = QtGui.QPixmap(26, 18)
+        pixmap.fill(QtCore.Qt.GlobalColor.transparent)
+        painter = QtGui.QPainter(pixmap)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
+        pen = QtGui.QPen(QtGui.QColor("#425466"), 1.8)
+        painter.setPen(pen)
+        painter.setBrush(QtGui.QBrush(QtGui.QColor("#ffffff")))
+        if facing:
+            painter.drawRoundedRect(QtCore.QRectF(2, 2.5, 8.5, 13), 1.8, 1.8)
+            painter.drawRoundedRect(QtCore.QRectF(15.5, 2.5, 8.5, 13), 1.8, 1.8)
+        else:
+            painter.drawRoundedRect(QtCore.QRectF(5, 2.5, 16, 13), 1.8, 1.8)
+        painter.end()
+        return QtGui.QIcon(pixmap)
+
+    def _set_preview_mode(self, mode: PreviewMode) -> None:
+        self.preview_mode_single_button.blockSignals(True)
+        self.preview_mode_facing_button.blockSignals(True)
+        self.preview_mode_single_button.setChecked(mode == PreviewMode.SINGLE_PAGE)
+        self.preview_mode_facing_button.setChecked(mode == PreviewMode.FACING_PAGES)
+        self.preview_mode_single_button.blockSignals(False)
+        self.preview_mode_facing_button.blockSignals(False)
         self.refresh_preview()
-
-    def _update_navigation_labels(self) -> None:
-        self.prev_button.setText("Previous")
-        self.next_button.setText("Next")
 
     def _first_page_side(self) -> PageSide:
         return PageSide.RIGHT_ODD if self.first_page_side_combo.currentIndex() == 0 else PageSide.LEFT_EVEN
@@ -547,21 +615,37 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _page_item_title(self, item: OutputItem) -> str:
         if item.kind == OutputItemKind.SOURCE_PAGE and item.source_page_number is not None:
-            return f"Source page {item.source_page_number}"
+            return f"Source page {item.source_page_number} — {item.side.label}"
         if item.kind == OutputItemKind.INTENTIONAL_BLANK:
-            return self._blank_label(item)
+            return f"Inserted blank — {item.side.label}"
         if item.kind == OutputItemKind.AUTOMATIC_FINAL_BLANK:
-            return "Automatic final blank"
+            return f"Automatic final blank — {item.side.label}"
         if item.kind == OutputItemKind.TEST_PADDING_BLANK:
-            return "Test padding blank"
+            return f"Test padding blank — {item.side.label}"
         return "Output item"
 
     def _preview_summary_text(self, item: OutputItem) -> str:
-        if item.kind == OutputItemKind.SOURCE_PAGE and item.source_page_number is not None:
-            return f"Output {item.output_position} - {item.side.label}"
-        if item.kind == OutputItemKind.INTENTIONAL_BLANK:
-            return f"Output {item.output_position} - {item.side.label}"
-        return f"Output {item.output_position} - {item.side.label}"
+        return ""
+
+    def _preview_footer_text(self, composition: DocumentComposition, active_item: OutputItem, mode: PreviewMode) -> str:
+        if mode == PreviewMode.SINGLE_PAGE:
+            if active_item.kind == OutputItemKind.SOURCE_PAGE and active_item.source_page_number is not None:
+                return f"Page {active_item.source_page_number} of {len(composition.source_page_sizes)}"
+            return f"Output {self._active_output_position} of {len(composition.items)}"
+
+        spread = resolve_facing_spread(composition, self._active_output_position)
+        source_items = [item for item in (spread.left_item, spread.right_item) if item is not None and item.source_page_number is not None]
+        if len(source_items) >= 2:
+            left = source_items[0].source_page_number
+            right = source_items[-1].source_page_number
+            return f"Pages {left}-{right} of {len(composition.source_page_sizes)}"
+        if len(source_items) == 1:
+            return f"Page {source_items[0].source_page_number} of {len(composition.source_page_sizes)}"
+        if spread.left_item is not None:
+            return f"Output {spread.left_item.output_position} of {len(composition.items)}"
+        if spread.right_item is not None:
+            return f"Output {spread.right_item.output_position} of {len(composition.items)}"
+        return f"Output {self._active_output_position} of {len(composition.items)}"
 
     def _source_preview_page(self, item: OutputItem, compact: bool) -> tuple[PreviewPage, tuple[str | None, bool]]:
         if self._pdf is None or item.source_page_index is None:
@@ -585,29 +669,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 warning_error = True
             elif placement.outer_warning:
                 warning_text = "The page canvas extends beyond the output edge. Check the preview for actual content clipping."
-        if compact:
-            summary = self._preview_summary_text(item)
-        else:
-            if estimate.margins and transformed:
-                original = estimate.margins
-                summary = (
-                    "Original outer margins: "
-                    f"left {format_mm(original.left_mm)}, right {format_mm(original.right_mm)}, "
-                    f"top {format_mm(original.top_mm)}, bottom {format_mm(original.bottom_mm)}\n"
-                    "Estimated outer margins after transformation: "
-                    f"left {format_mm(transformed.left_mm)}, right {format_mm(transformed.right_mm)}, "
-                    f"top {format_mm(transformed.top_mm)}, bottom {format_mm(transformed.bottom_mm)}"
-                )
-            elif estimate.margins:
-                original = estimate.margins
-                summary = (
-                    "Original outer margins: "
-                    f"left {format_mm(original.left_mm)}, right {format_mm(original.right_mm)}, "
-                    f"top {format_mm(original.top_mm)}, bottom {format_mm(original.bottom_mm)}\n"
-                    "Estimated outer margins after transformation: no visible content detected"
-                )
-            else:
-                summary = "Estimated margins: no visible content detected"
+        summary = ""
 
         pixmap = self._pdf.preview_pixmap(item.source_page_index, self.scale_spin.value(), shifts, binding_side, self.show_original_check.isChecked())
         preview_page = PreviewPage(
@@ -633,7 +695,7 @@ class MainWindow(QtWidgets.QMainWindow):
             target_rect=None,
             pixmap=None,
             title_text=self._page_item_title(item),
-            summary_text=self._preview_summary_text(item),
+            summary_text="",
             is_placeholder=False,
             page_side=item.side,
         )
@@ -646,7 +708,7 @@ class MainWindow(QtWidgets.QMainWindow):
             target_rect=None,
             pixmap=None,
             title_text=title_text,
-            summary_text=summary_text,
+            summary_text="",
             is_placeholder=True,
         )
 
@@ -676,6 +738,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.current_item_label.setText("-")
             self.current_page_label.setText("-")
             self.output_position_label.setText("-")
+            self.preview_location_label.setText("-")
             self.side_label.setText("-")
             self.shift_mode_label.setText("-")
             self.shift_value_label.setText("-")
@@ -689,6 +752,7 @@ class MainWindow(QtWidgets.QMainWindow):
         composition = self._compose_layout()
         if composition is None or not composition.items:
             self.preview.set_state(None)
+            self.preview_location_label.setText("-")
             self._set_status("")
             return
 
@@ -720,9 +784,9 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 ref = spread.right_item
                 if ref is not None:
-                    pages.append(self._placeholder_preview_page(fitz.Rect(0, 0, ref.page_width_pt, ref.page_height_pt), "Inside cover / no facing page", "No source page on this side."))
+                    pages.append(self._placeholder_preview_page(fitz.Rect(0, 0, ref.page_width_pt, ref.page_height_pt), "Blank / no facing page", "No source page on this side."))
                 else:
-                    pages.append(self._placeholder_preview_page(fitz.Rect(0, 0, 210, 297), "Inside cover / no facing page", "No source page on this side."))
+                    pages.append(self._placeholder_preview_page(fitz.Rect(0, 0, 210, 297), "Blank / no facing page", "No source page on this side."))
 
             if spread.right_item is not None:
                 if spread.right_item.kind == OutputItemKind.SOURCE_PAGE:
@@ -735,9 +799,9 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 ref = spread.left_item
                 if ref is not None:
-                    pages.append(self._placeholder_preview_page(fitz.Rect(0, 0, ref.page_width_pt, ref.page_height_pt), "Blank / no source page", "No source page on this side."))
+                    pages.append(self._placeholder_preview_page(fitz.Rect(0, 0, ref.page_width_pt, ref.page_height_pt), "Blank / no facing page", "No source page on this side."))
                 else:
-                    pages.append(self._placeholder_preview_page(fitz.Rect(0, 0, 210, 297), "Blank / no source page", "No source page on this side."))
+                    pages.append(self._placeholder_preview_page(fitz.Rect(0, 0, 210, 297), "Blank / no facing page", "No source page on this side."))
             page_label = f"Current spread: {format_facing_indicator(spread)}"
 
         if active_item.kind == OutputItemKind.SOURCE_PAGE and active_item.source_page_index is not None:
@@ -785,6 +849,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.current_item_label.setText(f"Current item: {self._active_item_description(active_item)}")
         self.current_page_label.setText(page_label)
         self.output_position_label.setText(f"Output position: {self._active_output_position} of {len(composition.items)}")
+        self.preview_location_label.setText(self._preview_footer_text(composition, active_item, mode))
         self.side_label.setText(f"Computed side: {active_item.side.label}")
         self.shift_mode_label.setText(f"Preview mode: {'Facing pages' if mode == PreviewMode.FACING_PAGES else 'Single page'}")
         self.shift_value_label.setText(
@@ -798,8 +863,8 @@ class MainWindow(QtWidgets.QMainWindow):
             mode=mode,
             page_count=len(composition.items),
             active_page_number=active_item.source_page_number or active_item.blank_reference_source_page_number or 1,
-            indicator_text=page_label if mode == PreviewMode.SINGLE_PAGE else format_facing_indicator(resolve_facing_spread(composition, self._active_output_position)),
-            note_text=self._preview_note_text(),
+            indicator_text="",
+            note_text="",
             scale=self.scale_spin.value(),
             binding_side=self._selected_binding_side(),
             show_original_position=self.show_original_check.isChecked(),

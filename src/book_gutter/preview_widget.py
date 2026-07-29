@@ -119,37 +119,10 @@ class PagePreviewWidget(QtWidgets.QWidget):
             self._rebuild_layout()
 
         state = self._state
-        self._draw_header_and_footer(painter, state)
         self._draw_binding_space(painter, state)
 
         for entry in self._layout:
             self._draw_page(painter, state, entry)
-
-    def _draw_header_and_footer(self, painter: QtGui.QPainter, state: PreviewState) -> None:
-        margin = 18
-        header_rect = QtCore.QRectF(margin, margin, self.width() - margin * 2.0, 28.0)
-        painter.setPen(QtGui.QColor("#3d3d3d"))
-        header_font = painter.font()
-        header_font.setPointSize(header_font.pointSize() + 2)
-        header_font.setBold(True)
-        painter.setFont(header_font)
-        painter.drawText(header_rect, QtCore.Qt.AlignmentFlag.AlignHCenter | QtCore.Qt.AlignmentFlag.AlignVCenter, state.indicator_text)
-
-        if state.note_text:
-            footer_rect = QtCore.QRectF(margin, self.height() - 52.0, self.width() - margin * 2.0, 36.0)
-            footer_bg = QtGui.QColor("#ffffff")
-            footer_bg.setAlpha(210)
-            painter.fillRect(footer_rect, footer_bg)
-            painter.setPen(QtGui.QColor("#6a5b3d"))
-            footer_font = painter.font()
-            footer_font.setPointSize(footer_font.pointSize() - 1)
-            footer_font.setBold(False)
-            painter.setFont(footer_font)
-            painter.drawText(
-                footer_rect.adjusted(4, 0, -4, 0),
-                QtCore.Qt.AlignmentFlag.AlignHCenter | QtCore.Qt.AlignmentFlag.AlignVCenter | QtCore.Qt.TextFlag.TextWordWrap,
-                state.note_text,
-            )
 
     def _draw_binding_space(self, painter: QtGui.QPainter, state: PreviewState) -> None:
         if state.mode != PreviewMode.FACING_PAGES or not state.show_binding_space or len(self._layout) < 2:
@@ -217,22 +190,29 @@ class PagePreviewWidget(QtWidgets.QWidget):
         title_font.setPointSize(max(8, title_font.pointSize()))
         painter.setFont(title_font)
         painter.setPen(QtGui.QColor("#1f2933"))
-        painter.drawText(
-            entry.title_rect,
-            QtCore.Qt.AlignmentFlag.AlignHCenter | QtCore.Qt.AlignmentFlag.AlignVCenter | QtCore.Qt.TextFlag.TextWordWrap,
-            page.title_text,
-        )
+        if page.summary_text:
+            painter.drawText(
+                entry.title_rect,
+                QtCore.Qt.AlignmentFlag.AlignHCenter | QtCore.Qt.AlignmentFlag.AlignVCenter | QtCore.Qt.TextFlag.TextWordWrap,
+                page.title_text,
+            )
 
-        summary_font = painter.font()
-        summary_font.setBold(False)
-        summary_font.setPointSize(max(8, summary_font.pointSize() - 1))
-        painter.setFont(summary_font)
-        painter.setPen(QtGui.QColor("#45515f"))
-        painter.drawText(
-            entry.summary_rect,
-            QtCore.Qt.AlignmentFlag.AlignHCenter | QtCore.Qt.AlignmentFlag.AlignVCenter | QtCore.Qt.TextFlag.TextWordWrap,
-            page.summary_text,
-        )
+            summary_font = painter.font()
+            summary_font.setBold(False)
+            summary_font.setPointSize(max(8, summary_font.pointSize() - 1))
+            painter.setFont(summary_font)
+            painter.setPen(QtGui.QColor("#45515f"))
+            painter.drawText(
+                entry.summary_rect,
+                QtCore.Qt.AlignmentFlag.AlignHCenter | QtCore.Qt.AlignmentFlag.AlignVCenter | QtCore.Qt.TextFlag.TextWordWrap,
+                page.summary_text,
+            )
+        else:
+            painter.drawText(
+                entry.caption_rect.adjusted(8.0, 4.0, -8.0, -4.0),
+                QtCore.Qt.AlignmentFlag.AlignHCenter | QtCore.Qt.AlignmentFlag.AlignVCenter | QtCore.Qt.TextFlag.TextWordWrap,
+                page.title_text,
+            )
 
     def _rebuild_layout(self) -> None:
         self._layout = []
@@ -242,9 +222,7 @@ class PagePreviewWidget(QtWidgets.QWidget):
             return
 
         margin = 22.0
-        header_space = 38.0
-        footer_space = 50.0 if state.note_text else 10.0
-        available = self.rect().adjusted(margin, margin + header_space, -margin, -margin - footer_space)
+        available = self.rect().adjusted(margin, margin, -margin, -margin)
         if available.width() <= 0 or available.height() <= 0:
             return
 
