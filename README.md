@@ -10,7 +10,7 @@ This is not booklet imposition software. It does not rearrange pages into folded
 
 <!-- Add application screenshot at docs/images/book-gutter-preview.png -->
 
-The future preview image should show Single Page preview, Facing Pages preview, independent odd/even binding shifts, and the binding-space visualization.
+The preview should show the default Facing Pages view, Single Page preview, independent odd/even binding shifts, and the binding-space visualization.
 
 ## Why this project exists
 
@@ -53,6 +53,7 @@ Booklet tools solve a different problem. They reorder pages into signatures for 
 
 ### Single-page preview
 
+- Secondary inspection mode
 - Detailed page inspection
 - Current side and shift shown in the preview details
 - Estimated clipping warning
@@ -61,11 +62,26 @@ Booklet tools solve a different problem. They reorder pages into signatures for 
 
 ### Facing-pages preview
 
+- Default preview mode
 - Simulates an open bound book
+- Shows how left/even and right/odd pages relate around the binding
 - Left/even page shown on the left
 - Right/odd page shown on the right
 - Central binding area visible
 - Independent odd/even shifts visible together
+- Useful for judging gutter balance and binding space
+
+## Preview modes
+
+Facing Pages is the default because the app is designed for side-bound print layout.
+
+Facing Pages is used for normal layout checking. It shows the open-book view and makes it easier to compare left/even and right/odd pages around the binding.
+
+Single Page is available for detailed inspection and clipping checks.
+
+Preview mode affects only how the document is inspected. It does not change page order or export geometry.
+
+Opening a new PDF resets the preview to Facing Pages.
 
 ### Test PDF export
 
@@ -117,6 +133,8 @@ The inserted blank changes the side of all following pages.
 ## Facing spreads versus duplex sheets
 
 This distinction matters.
+
+The preview mode changes how the document is viewed, not how it is exported.
 
 Facing-page preview examples:
 
@@ -228,17 +246,18 @@ that means PyMuPDF is not installed in the Python environment being used. The fi
 ## Quick start
 
 1. Open a PDF.
-2. Choose left or right binding.
-3. Set whether source PDF page 1 is right / odd or left / even.
-4. Choose odd and even shifts.
+2. Confirm whether source PDF page 1 appears on the Right/Odd or Left/Even side.
+3. Choose left or right binding.
+4. Set odd and even shifts.
 5. Keep scale at 100% initially.
-6. Inspect Single Page and Facing Pages previews.
-7. Insert intentional blanks where chapters need separation.
-8. Create a four-page Test PDF.
-9. Print it duplex and check the physical binding.
-10. Adjust shifts or scaling if needed.
-11. Create the full print-ready PDF.
-12. Print normally at actual size or 100%.
+6. Use the default Facing Pages preview to judge the gutter.
+7. Switch to Single Page only when you need close inspection of one page.
+8. Create a four-page Test PDF before exporting the whole book.
+9. Insert intentional blanks where chapters need separation.
+10. Print it duplex and check the physical binding.
+11. Adjust shifts or scaling if needed.
+12. Create the full print-ready PDF.
+13. Print normally at actual size or 100%.
 
 Printer reload orientation can vary, so test your printer's duplex behavior separately before relying on a large run.
 
