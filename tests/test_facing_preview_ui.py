@@ -105,6 +105,7 @@ def test_facing_preview_clicks_pages_and_ignores_placeholder(tmp_path, qapp):
     qapp.processEvents()
     regions = window.preview.hit_regions()
     placeholder_region = next(region.rect for region in regions if region.is_placeholder)
+    assert window.preview._state.pages[0].title_text == "No facing page"
     QtTest.QTest.mouseClick(
         window.preview,
         QtCore.Qt.MouseButton.LeftButton,
@@ -125,15 +126,21 @@ def test_preview_header_buttons_and_labels_are_concise(tmp_path, qapp):
 
     assert window.preview_mode_single_button.text() == "Single Page"
     assert window.preview_mode_facing_button.text() == "Facing Pages"
+    assert window.preview_mode_single_button.icon().isNull() is False
+    assert window.preview_mode_facing_button.icon().isNull() is False
     assert window.preview_mode_single_button.isChecked() is True
     assert window.preview_mode_facing_button.isChecked() is False
     assert window.preview._state is not None
     assert window.preview._state.indicator_text == ""
+    assert window.original_position_legend_label.isHidden() is True
 
     window.page_spin.setValue(2)
     qapp.processEvents()
     assert window.preview._state.pages[0].title_text == "Source page 2 — Left / Even"
     assert "Output" not in window.preview._state.pages[0].title_text
+    window.show_original_check.setChecked(True)
+    qapp.processEvents()
+    assert window.original_position_legend_label.isHidden() is False
 
     window.page_spin.setValue(2)
     window.insert_blank_before_current_page()
@@ -142,6 +149,75 @@ def test_preview_header_buttons_and_labels_are_concise(tmp_path, qapp):
     qapp.processEvents()
     assert window.preview._state.pages[0].title_text == "Inserted blank — Left / Even"
     assert "Output" not in window.preview._state.pages[0].title_text
+    window.close()
+
+
+def test_blank_controls_show_clear_empty_state_and_toggle_remove_button(tmp_path, qapp):
+    src = tmp_path / "source.pdf"
+    make_pdf(src)
+    window = MainWindow()
+    window.load_pdf(src)
+    _show_window(window, qapp)
+
+    assert window.insert_blank_before_button.text() == "Add blank before current page"
+    assert window.insert_blank_after_button.text() == "Add blank after current page"
+    assert window.remove_blank_button.text() == "Remove selected inserted blank"
+    assert window.blank_stack.currentWidget() is window.blank_empty_label
+    assert window.blank_empty_label.text() == "No inserted blank pages."
+    assert window.remove_blank_button.isEnabled() is False
+
+    window.insert_blank_before_current_page()
+    qapp.processEvents()
+
+    assert window.blank_stack.currentWidget() is window.blank_list
+    assert window.blank_list.count() == 1
+    assert window.blank_list.item(0).text() == "Before Source page 1"
+    assert window.remove_blank_button.isEnabled() is True
+    window.close()
+
+
+def test_preview_keyboard_navigation_respects_focus_and_modes(tmp_path, qapp):
+    src = tmp_path / "source.pdf"
+    make_pdf(src)
+    window = MainWindow()
+    window.load_pdf(src)
+    _show_window(window, qapp)
+
+    QtTest.QTest.keyClick(window, QtCore.Qt.Key.Key_Right)
+    qapp.processEvents()
+    assert window.page_spin.value() == 2
+
+    QtTest.QTest.keyClick(window, QtCore.Qt.Key.Key_PageDown)
+    qapp.processEvents()
+    assert window.page_spin.value() == 3
+
+    QtTest.QTest.keyClick(window, QtCore.Qt.Key.Key_Home)
+    qapp.processEvents()
+    assert window.page_spin.value() == 1
+
+    QtTest.QTest.keyClick(window, QtCore.Qt.Key.Key_End)
+    qapp.processEvents()
+    assert window.page_spin.value() == 5
+
+    window.preview_mode_facing_button.click()
+    qapp.processEvents()
+    window.page_spin.setValue(2)
+    qapp.processEvents()
+
+    QtTest.QTest.keyClick(window, QtCore.Qt.Key.Key_Right)
+    qapp.processEvents()
+    assert window.page_spin.value() == 4
+
+    QtTest.QTest.keyClick(window, QtCore.Qt.Key.Key_Left)
+    qapp.processEvents()
+    assert window.page_spin.value() == 2
+
+    window.page_spin.setValue(3)
+    window.page_spin.setFocus()
+    qapp.processEvents()
+    QtTest.QTest.keyClick(window, QtCore.Qt.Key.Key_Right)
+    qapp.processEvents()
+    assert window.page_spin.value() == 3
     window.close()
 
 
@@ -167,24 +243,21 @@ def test_preview_footer_navigation_updates_pages_and_spreads(tmp_path, qapp):
     window.load_pdf(src)
     _show_window(window, qapp)
 
-    window.page_spin.setValue(2)
-    qapp.processEvents()
-    window.next_button.click()
-    qapp.processEvents()
-    assert window.page_spin.value() == 3
-    assert window.preview_location_label.text() == "Page 3 of 5"
-
     window.preview_mode_facing_button.click()
     qapp.processEvents()
     window.page_spin.setValue(2)
     qapp.processEvents()
-    assert window.preview_location_label.text() == "Pages 2-3 of 5"
-
     window.next_button.click()
     qapp.processEvents()
-    assert window.preview_location_label.text() == "Pages 2-3 of 5"
+    assert window.page_spin.value() == 4
+    assert window.preview_location_label.text() == "Pages 4-5 of 5"
 
     window.next_button.click()
     qapp.processEvents()
     assert window.preview_location_label.text() == "Pages 4-5 of 5"
+
+    window.prev_button.click()
+    qapp.processEvents()
+    assert window.page_spin.value() == 2
+    assert window.preview_location_label.text() == "Pages 2-3 of 5"
     window.close()

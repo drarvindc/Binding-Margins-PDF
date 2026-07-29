@@ -168,10 +168,10 @@ class PagePreviewWidget(QtWidgets.QWidget):
         painter.drawRoundedRect(rect, 6.0, 6.0)
 
         if not page.is_placeholder and state.show_original_position and page.page_index is not None:
-            painter.setPen(QtGui.QPen(QtGui.QColor("#c05621"), 2, QtCore.Qt.PenStyle.DashLine))
+            painter.setPen(QtGui.QPen(QtGui.QColor("#d13b3b"), 2, QtCore.Qt.PenStyle.DashLine))
             if page.page_side is not None:
                 original_rect = target_rect_for_page(page.page_rect, state.scale, 0.0, page.page_side, state.binding_side)
-                painter.drawRoundedRect(self._map_source_rect(page.page_rect, rect, original_rect), 4.0, 4.0)
+                painter.drawRoundedRect(self._map_source_rect(page.page_rect, rect, original_rect).adjusted(-1.0, -1.0, 1.0, 1.0), 4.0, 4.0)
 
         self._draw_caption(painter, entry, page, page.page_number == state.active_page_number)
 
@@ -221,7 +221,7 @@ class PagePreviewWidget(QtWidgets.QWidget):
         if state is None:
             return
 
-        margin = 22.0
+        margin = 18.0
         available = self.rect().adjusted(margin, margin, -margin, -margin)
         if available.width() <= 0 or available.height() <= 0:
             return
@@ -236,7 +236,7 @@ class PagePreviewWidget(QtWidgets.QWidget):
 
     def _single_layout(self, state: PreviewState, available: QtCore.QRectF) -> list[_LayoutEntry]:
         page = state.pages[0]
-        caption_height = 62.0
+        caption_height = 50.0
         page_area = QtCore.QRectF(available.left(), available.top(), available.width(), max(1.0, available.height() - caption_height))
         scale = min(page_area.width() / page.page_rect.width, page_area.height() / page.page_rect.height)
         scale = max(scale, 0.01)
@@ -246,14 +246,14 @@ class PagePreviewWidget(QtWidgets.QWidget):
         page_left = page_area.left() + (page_area.width() - page_width) / 2.0
         page_top = page_area.top() + (page_area.height() - page_height) / 2.0
         page_rect = QtCore.QRectF(page_left, page_top, page_width, page_height)
-        caption_rect = QtCore.QRectF(page_rect.left(), page_rect.bottom() + 8.0, page_rect.width(), caption_height - 8.0)
+        caption_rect = QtCore.QRectF(page_rect.left(), page_rect.bottom() + 6.0, page_rect.width(), caption_height - 6.0)
         return [
             _LayoutEntry(
                 page=page,
                 page_rect=page_rect,
                 caption_rect=caption_rect,
-                title_rect=caption_rect.adjusted(8.0, 4.0, -8.0, -caption_height / 2.0),
-                summary_rect=caption_rect.adjusted(8.0, caption_height / 2.0 - 2.0, -8.0, -4.0),
+                title_rect=caption_rect.adjusted(8.0, 3.0, -8.0, -caption_height / 2.0),
+                summary_rect=caption_rect.adjusted(8.0, caption_height / 2.0 - 2.0, -8.0, -3.0),
             )
         ]
 
@@ -263,9 +263,9 @@ class PagePreviewWidget(QtWidgets.QWidget):
             return self._single_layout(state, available)
 
         left_page, right_page = pages[0], pages[1]
-        caption_height = 58.0
-        gap = 32.0
-        page_band_height = max(1.0, available.height() - caption_height - 8.0)
+        caption_height = 48.0
+        gap = 28.0
+        page_band_height = max(1.0, available.height() - caption_height - 6.0)
 
         left_size = self._page_size(left_page)
         right_size = self._page_size(right_page)
@@ -278,7 +278,7 @@ class PagePreviewWidget(QtWidgets.QWidget):
         total_width = left_draw[0] + gap + right_draw[0]
         start_x = available.left() + (available.width() - total_width) / 2.0
         band_top = available.top() + (page_band_height - max(left_draw[1], right_draw[1])) / 2.0
-        caption_top = band_top + max(left_draw[1], right_draw[1]) + 8.0
+        caption_top = band_top + max(left_draw[1], right_draw[1]) + 6.0
 
         left_rect = QtCore.QRectF(start_x, band_top + (max(left_draw[1], right_draw[1]) - left_draw[1]) / 2.0, left_draw[0], left_draw[1])
         right_rect = QtCore.QRectF(left_rect.right() + gap, band_top + (max(left_draw[1], right_draw[1]) - right_draw[1]) / 2.0, right_draw[0], right_draw[1])
@@ -291,14 +291,14 @@ class PagePreviewWidget(QtWidgets.QWidget):
                 page_rect=left_rect,
                 caption_rect=left_caption,
                 title_rect=left_caption.adjusted(8.0, 3.0, -8.0, -caption_height / 2.0),
-                summary_rect=left_caption.adjusted(8.0, caption_height / 2.0 - 1.0, -8.0, -4.0),
+                summary_rect=left_caption.adjusted(8.0, caption_height / 2.0 - 1.0, -8.0, -3.0),
             ),
             _LayoutEntry(
                 page=right_page,
                 page_rect=right_rect,
                 caption_rect=right_caption,
                 title_rect=right_caption.adjusted(8.0, 3.0, -8.0, -caption_height / 2.0),
-                summary_rect=right_caption.adjusted(8.0, caption_height / 2.0 - 1.0, -8.0, -4.0),
+                summary_rect=right_caption.adjusted(8.0, caption_height / 2.0 - 1.0, -8.0, -3.0),
             ),
         ]
 

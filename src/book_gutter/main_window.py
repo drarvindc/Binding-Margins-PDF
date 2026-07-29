@@ -165,6 +165,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.test_export_button = QtWidgets.QPushButton("Create Test PDF")
         self.cancel_button = QtWidgets.QPushButton("Cancel Export")
         self.cancel_button.setEnabled(False)
+        self.cancel_button.setVisible(False)
         self.open_output_button = QtWidgets.QPushButton("Open Output Folder")
         self.open_output_button.setEnabled(False)
 
@@ -207,11 +208,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.show_binding_space_check.setChecked(True)
         self.show_original_check = QtWidgets.QCheckBox("Show original position")
 
-        self.insert_blank_before_button = QtWidgets.QPushButton("Insert blank before")
-        self.insert_blank_after_button = QtWidgets.QPushButton("Insert blank after")
+        self.insert_blank_before_button = QtWidgets.QPushButton("Add blank before current page")
+        self.insert_blank_after_button = QtWidgets.QPushButton("Add blank after current page")
         self.blank_list = QtWidgets.QListWidget()
         self.blank_list.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
-        self.remove_blank_button = QtWidgets.QPushButton("Remove selected blank")
+        self.remove_blank_button = QtWidgets.QPushButton("Remove selected inserted blank")
+        self.remove_blank_button.setEnabled(False)
+        self.blank_empty_label = QtWidgets.QLabel("No inserted blank pages.")
+        self.blank_empty_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.blank_empty_label.setWordWrap(True)
+        self.blank_empty_label.setStyleSheet("color: #6f6a61; padding: 16px 10px;")
+        self.blank_stack = QtWidgets.QStackedWidget()
+        self.blank_stack.addWidget(self.blank_empty_label)
+        self.blank_stack.addWidget(self.blank_list)
 
         self.page_spin = QtWidgets.QSpinBox()
         self.page_spin.setRange(1, 1)
@@ -226,13 +235,25 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preview_mode_group.addButton(self.preview_mode_facing_button)
         self.preview_mode_single_button.clicked.connect(lambda: self._set_preview_mode(PreviewMode.SINGLE_PAGE))
         self.preview_mode_facing_button.clicked.connect(lambda: self._set_preview_mode(PreviewMode.FACING_PAGES))
+        self.preview_mode_single_button.setToolTip("Single page preview.\nShortcut: Left/Right, Page Up/Page Down, Home, End.")
+        self.preview_mode_facing_button.setToolTip("Facing pages preview.\nShortcut: Left/Right, Page Up/Page Down, Home, End.")
 
         self.prev_button = QtWidgets.QPushButton("Previous")
         self.next_button = QtWidgets.QPushButton("Next")
+        self.prev_button.setMinimumHeight(34)
+        self.next_button.setMinimumHeight(34)
+        self.page_spin.setMinimumHeight(34)
+        self.page_spin.setFixedWidth(92)
         self.preview_location_label = QtWidgets.QLabel("")
         self.preview_location_label.setObjectName("previewLocationLabel")
         self.preview_location_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.preview_location_label.setStyleSheet("color: #5f5a52; font-weight: 600;")
+        self.original_position_legend_label = QtWidgets.QLabel("Blue = shifted/current   Red dashed = original position")
+        self.original_position_legend_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.original_position_legend_label.setStyleSheet("color: #7c7467; font-size: 11px;")
+        self.prev_button.setToolTip("Previous page or spread.\nShortcut: Left Arrow or Page Up.")
+        self.next_button.setToolTip("Next page or spread.\nShortcut: Right Arrow or Page Down.")
+        self.page_spin.setToolTip("Jump to a source page. Keyboard shortcuts: Home and End.")
 
         self.current_item_label = QtWidgets.QLabel("-")
         self.current_page_label = QtWidgets.QLabel("-")
@@ -258,14 +279,14 @@ class MainWindow(QtWidgets.QMainWindow):
         form.addRow("", self.blank_check)
         form.addRow("", self.show_original_check)
 
-        blank_box = QtWidgets.QGroupBox("Inserted blanks")
+        blank_box = QtWidgets.QGroupBox("Blank pages")
         blank_box_layout = QtWidgets.QVBoxLayout(blank_box)
         blank_button_row = QtWidgets.QHBoxLayout()
         blank_button_row.addWidget(self.insert_blank_before_button)
         blank_button_row.addWidget(self.insert_blank_after_button)
-        blank_button_row.addWidget(self.remove_blank_button)
         blank_box_layout.addLayout(blank_button_row)
-        blank_box_layout.addWidget(self.blank_list)
+        blank_box_layout.addWidget(self.blank_stack)
+        blank_box_layout.addWidget(self.remove_blank_button, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
 
         top = QtWidgets.QHBoxLayout()
         top.addWidget(self.open_button)
@@ -307,12 +328,21 @@ class MainWindow(QtWidgets.QMainWindow):
         left_widget.setLayout(left)
         preview_panel = QtWidgets.QWidget()
         preview_panel_layout = QtWidgets.QVBoxLayout(preview_panel)
-        preview_panel_layout.setContentsMargins(0, 0, 0, 0)
-        preview_panel_layout.setSpacing(10)
+        preview_panel_layout.setContentsMargins(12, 12, 12, 12)
+        preview_panel_layout.setSpacing(12)
+        preview_panel.setObjectName("previewPanel")
+        preview_panel.setStyleSheet(
+            "QWidget#previewPanel {"
+            "  background: #f5f1ea;"
+            "  border: 1px solid #ddd4c7;"
+            "  border-radius: 12px;"
+            "}"
+        )
 
         preview_header = QtWidgets.QHBoxLayout()
         preview_header.setContentsMargins(2, 0, 2, 0)
         preview_header.setSpacing(8)
+        preview_header.addStretch(1)
         preview_header.addWidget(self.preview_mode_single_button)
         preview_header.addWidget(self.preview_mode_facing_button)
         preview_header.addStretch(1)
@@ -320,6 +350,7 @@ class MainWindow(QtWidgets.QMainWindow):
         preview_footer = QtWidgets.QHBoxLayout()
         preview_footer.setContentsMargins(2, 0, 2, 0)
         preview_footer.setSpacing(8)
+        preview_footer.addStretch(1)
         preview_footer.addWidget(self.prev_button)
         preview_footer.addWidget(self.page_spin)
         preview_footer.addWidget(self.preview_location_label)
@@ -327,6 +358,7 @@ class MainWindow(QtWidgets.QMainWindow):
         preview_footer.addStretch(1)
 
         preview_panel_layout.addLayout(preview_header)
+        preview_panel_layout.addWidget(self.original_position_legend_label)
         preview_panel_layout.addWidget(self.preview, 1)
         preview_panel_layout.addLayout(preview_footer)
 
@@ -356,12 +388,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.insert_blank_before_button.clicked.connect(self.insert_blank_before_current_page)
         self.insert_blank_after_button.clicked.connect(self.insert_blank_after_current_page)
         self.remove_blank_button.clicked.connect(self.remove_selected_blank)
+        self.blank_list.itemSelectionChanged.connect(self._update_blank_controls)
         self.prev_button.clicked.connect(self.previous_page)
         self.next_button.clicked.connect(self.next_page)
         self.preview.page_clicked.connect(self._set_active_source_page)
 
         self._sync_shift_controls(self.same_shift_check.isChecked())
         self._set_preview_mode(PreviewMode.SINGLE_PAGE)
+        self.original_position_legend_label.setVisible(False)
 
     def _sync_shift_controls(self, same: bool) -> None:
         self.even_shift_spin.setEnabled(not same)
@@ -393,6 +427,7 @@ class MainWindow(QtWidgets.QMainWindow):
         button.setCheckable(True)
         button.setAutoRaise(False)
         button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        button.setMinimumHeight(36)
         button.setObjectName(f"previewMode{''.join(part.title() for part in text.split())}Button")
         button.setStyleSheet(
             "QToolButton {"
@@ -483,18 +518,27 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _blank_label(self, item: OutputItem) -> str:
         if item.blank_placement == BlankPlacement.BEFORE:
-            return f"Blank before source page {item.blank_reference_source_page_number}"
+            return f"Before Source page {item.blank_reference_source_page_number}"
         if item.blank_placement == BlankPlacement.AFTER:
-            return f"Blank after source page {item.blank_reference_source_page_number}"
+            return f"After Source page {item.blank_reference_source_page_number}"
         if item.kind == OutputItemKind.TEST_PADDING_BLANK:
             return "Test padding blank"
         if item.kind == OutputItemKind.AUTOMATIC_FINAL_BLANK:
             return "Automatic final blank"
         return "Blank page"
 
+    def _update_blank_controls(self) -> None:
+        has_selection = self._selected_blank_insertion_id() is not None
+        self.remove_blank_button.setEnabled(has_selection)
+        if self.blank_list.count() == 0:
+            self.blank_stack.setCurrentWidget(self.blank_empty_label)
+        else:
+            self.blank_stack.setCurrentWidget(self.blank_list)
+
     def _refresh_blank_list(self) -> None:
         self.blank_list.clear()
         if not self._composition:
+            self._update_blank_controls()
             return
         for item in self._composition.items:
             if item.kind != OutputItemKind.INTENTIONAL_BLANK:
@@ -503,6 +547,9 @@ class MainWindow(QtWidgets.QMainWindow):
             list_item = QtWidgets.QListWidgetItem(label)
             list_item.setData(QtCore.Qt.ItemDataRole.UserRole, item.blank_insertion_id)
             self.blank_list.addItem(list_item)
+        if self.blank_list.count():
+            self.blank_list.setCurrentRow(0)
+        self._update_blank_controls()
 
     def _selected_blank_insertion_id(self) -> int | None:
         item = self.blank_list.currentItem()
@@ -713,12 +760,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
     def _preview_note_text(self) -> str:
-        notes: list[str] = []
-        if self._preview_mode() == PreviewMode.FACING_PAGES:
-            notes.append("Click a visible page to jump to its source page.")
-        if self._pdf and self.blank_check.isChecked() and self._composition and len(self._composition.items) % 2 == 1:
-            notes.append("Full export will append an automatic final blank page.")
-        return "\n".join(notes)
+        return ""
 
     def _active_item_description(self, item: OutputItem) -> str:
         if item.kind == OutputItemKind.SOURCE_PAGE and item.source_page_number is not None:
@@ -747,6 +789,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.content_margin_label.setText("Estimated margins: -")
             self._set_status("")
             self.blank_list.clear()
+            self._update_blank_controls()
+            self.original_position_legend_label.setVisible(False)
             return
 
         composition = self._compose_layout()
@@ -754,6 +798,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.preview.set_state(None)
             self.preview_location_label.setText("-")
             self._set_status("")
+            self._update_blank_controls()
+            self.original_position_legend_label.setVisible(False)
             return
 
         self._active_output_position = max(1, min(self._active_output_position, len(composition.items)))
@@ -784,9 +830,9 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 ref = spread.right_item
                 if ref is not None:
-                    pages.append(self._placeholder_preview_page(fitz.Rect(0, 0, ref.page_width_pt, ref.page_height_pt), "Blank / no facing page", "No source page on this side."))
+                    pages.append(self._placeholder_preview_page(fitz.Rect(0, 0, ref.page_width_pt, ref.page_height_pt), "No facing page", "No source page on this side."))
                 else:
-                    pages.append(self._placeholder_preview_page(fitz.Rect(0, 0, 210, 297), "Blank / no facing page", "No source page on this side."))
+                    pages.append(self._placeholder_preview_page(fitz.Rect(0, 0, 210, 297), "No facing page", "No source page on this side."))
 
             if spread.right_item is not None:
                 if spread.right_item.kind == OutputItemKind.SOURCE_PAGE:
@@ -799,9 +845,9 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 ref = spread.left_item
                 if ref is not None:
-                    pages.append(self._placeholder_preview_page(fitz.Rect(0, 0, ref.page_width_pt, ref.page_height_pt), "Blank / no facing page", "No source page on this side."))
+                    pages.append(self._placeholder_preview_page(fitz.Rect(0, 0, ref.page_width_pt, ref.page_height_pt), "No facing page", "No source page on this side."))
                 else:
-                    pages.append(self._placeholder_preview_page(fitz.Rect(0, 0, 210, 297), "Blank / no facing page", "No source page on this side."))
+                    pages.append(self._placeholder_preview_page(fitz.Rect(0, 0, 210, 297), "No facing page", "No source page on this side."))
             page_label = f"Current spread: {format_facing_indicator(spread)}"
 
         if active_item.kind == OutputItemKind.SOURCE_PAGE and active_item.source_page_index is not None:
@@ -858,6 +904,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.shift_direction_label.setText(f"Shift direction: {shift_direction}")
         self.scale_label.setText(f"Scale: {format_pct(self.scale_spin.value(), 1)}")
         self._set_status(warning_text or "", warning_error)
+        self.original_position_legend_label.setVisible(self.show_original_check.isChecked() and any(page.page_index is not None for page in pages))
 
         state = PreviewState(
             mode=mode,
@@ -896,12 +943,87 @@ class MainWindow(QtWidgets.QMainWindow):
     def previous_page(self) -> None:
         if not self._composition:
             return
-        self._set_active_output_position(previous_output_position(self._active_output_position, len(self._composition.items)))
+        self._set_active_output_position(self._previous_preview_position())
 
     def next_page(self) -> None:
         if not self._composition:
             return
-        self._set_active_output_position(next_output_position(self._active_output_position, len(self._composition.items)))
+        self._set_active_output_position(self._next_preview_position())
+
+    def first_page(self) -> None:
+        if not self._composition:
+            return
+        self._set_active_output_position(1)
+
+    def last_page(self) -> None:
+        if not self._composition:
+            return
+        self._set_active_output_position(len(self._composition.items))
+
+    def _previous_preview_position(self) -> int:
+        if not self._composition:
+            return 1
+        if self._preview_mode() == PreviewMode.SINGLE_PAGE:
+            return previous_output_position(self._active_output_position, len(self._composition.items))
+        spread = resolve_facing_spread(self._composition, self._active_output_position)
+        previous_anchor = spread.spread_start_position - 1
+        if previous_anchor < 1:
+            return spread.spread_start_position
+        return resolve_facing_spread(self._composition, previous_anchor).spread_start_position
+
+    def _next_preview_position(self) -> int:
+        if not self._composition:
+            return 1
+        if self._preview_mode() == PreviewMode.SINGLE_PAGE:
+            return next_output_position(self._active_output_position, len(self._composition.items))
+        spread = resolve_facing_spread(self._composition, self._active_output_position)
+        next_anchor = spread.spread_end_position + 1
+        if next_anchor > len(self._composition.items):
+            return spread.spread_start_position
+        return resolve_facing_spread(self._composition, next_anchor).spread_start_position
+
+    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # pragma: no cover - Qt event
+        if self._should_ignore_preview_keypress(event):
+            return super().keyPressEvent(event)
+        key = event.key()
+        if key in (
+            QtCore.Qt.Key.Key_Left,
+            QtCore.Qt.Key.Key_PageUp,
+        ):
+            self.previous_page()
+            event.accept()
+            return
+        if key in (
+            QtCore.Qt.Key.Key_Right,
+            QtCore.Qt.Key.Key_PageDown,
+        ):
+            self.next_page()
+            event.accept()
+            return
+        if key == QtCore.Qt.Key.Key_Home:
+            self.first_page()
+            event.accept()
+            return
+        if key == QtCore.Qt.Key.Key_End:
+            self.last_page()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def _should_ignore_preview_keypress(self, event: QtGui.QKeyEvent) -> bool:
+        if event.modifiers() != QtCore.Qt.KeyboardModifier.NoModifier:
+            return True
+        focus_widget = QtWidgets.QApplication.focusWidget()
+        if focus_widget is None:
+            return False
+        editable_types = (
+            QtWidgets.QLineEdit,
+            QtWidgets.QPlainTextEdit,
+            QtWidgets.QTextEdit,
+            QtWidgets.QAbstractSpinBox,
+            QtWidgets.QComboBox,
+        )
+        return isinstance(focus_widget, editable_types) or isinstance(focus_widget, QtWidgets.QAbstractItemView)
 
     def _export_via_dialog(self, selection, suggested_filename: str, open_folder_after_success: bool) -> None:
         if not self._pdf:
@@ -983,6 +1105,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._export_result_handled = False
         self.export_button.setEnabled(False)
         self.test_export_button.setEnabled(False)
+        self.cancel_button.setVisible(True)
         self.cancel_button.setEnabled(True)
         self._export_thread = QtCore.QThread()
         self._export_worker = ExportWorker(self._pdf, settings)
@@ -1023,6 +1146,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.export_button.setEnabled(True)
         self.test_export_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
+        self.cancel_button.setVisible(False)
         self._set_status("")
 
     def _format_page_list(self, pages: tuple[int, ...]) -> str:

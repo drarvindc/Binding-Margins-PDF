@@ -57,6 +57,7 @@ def test_test_export_completion_runs_on_main_thread_and_restores_controls(tmp_pa
 
     window = MainWindow()
     window.load_pdf(src)
+    assert window.cancel_button.isHidden() is True
 
     threads: list[tuple[str, QtCore.QThread]] = []
 
@@ -97,6 +98,7 @@ def test_full_export_completion_runs_on_main_thread_and_restores_controls(tmp_pa
 
     window = MainWindow()
     window.load_pdf(src)
+    assert window.cancel_button.isHidden() is True
 
     threads: list[tuple[str, QtCore.QThread]] = []
 
@@ -139,6 +141,7 @@ def test_export_failure_restores_controls_on_main_thread(tmp_path, qapp, monkeyp
 
     window = MainWindow()
     window.load_pdf(src)
+    assert window.cancel_button.isHidden() is True
 
     threads: list[QtCore.QThread] = []
 
@@ -246,6 +249,7 @@ def test_second_export_is_ignored_while_one_is_active(tmp_path, qapp, monkeypatc
     )
     window._start_export(first_settings, open_folder_after_success=False, test_export=False)
     assert started.wait(5.0) is True
+    assert window.cancel_button.isHidden() is False
     first_thread = window._export_thread
     first_worker = window._export_worker
 
@@ -257,4 +261,5 @@ def test_second_export_is_ignored_while_one_is_active(tmp_path, qapp, monkeypatc
     wait_for_export(window, qapp)
     assert out1.exists()
     assert not out2.exists()
+    assert window.cancel_button.isHidden() is True
     window.close()
