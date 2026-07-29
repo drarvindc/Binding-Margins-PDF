@@ -25,6 +25,16 @@ def _show_window(window: MainWindow, qapp) -> None:
     qapp.processEvents()
 
 
+def test_preview_mode_defaults_to_facing_pages_on_startup(qapp):
+    window = MainWindow()
+    window.show()
+    qapp.processEvents()
+
+    assert window.preview_mode_facing_button.isChecked() is True
+    assert window.preview_mode_single_button.isChecked() is False
+    window.close()
+
+
 def test_first_page_side_setting_flips_preview_labels(tmp_path, qapp):
     src = tmp_path / "source.pdf"
     make_pdf(src)
@@ -51,18 +61,47 @@ def test_preview_mode_switch_preserves_active_page(tmp_path, qapp):
     window.load_pdf(src)
     _show_window(window, qapp)
 
-    window.page_spin.setValue(4)
-    window.preview_mode_facing_button.click()
-    qapp.processEvents()
-    assert window.page_spin.value() == 4
     assert window.preview._state is not None
     assert window.preview._state.mode == PreviewMode.FACING_PAGES
-
+    window.page_spin.setValue(4)
     window.preview_mode_single_button.click()
     qapp.processEvents()
     assert window.page_spin.value() == 4
     assert window.preview._state is not None
     assert window.preview._state.mode == PreviewMode.SINGLE_PAGE
+
+    window.preview_mode_facing_button.click()
+    qapp.processEvents()
+    assert window.page_spin.value() == 4
+    assert window.preview._state is not None
+    assert window.preview._state.mode == PreviewMode.FACING_PAGES
+    window.close()
+
+
+def test_opening_new_pdf_resets_preview_mode_to_facing_pages(tmp_path, qapp):
+    src1 = tmp_path / "source1.pdf"
+    src2 = tmp_path / "source2.pdf"
+    make_pdf(src1)
+    make_pdf(src2, 3)
+
+    window = MainWindow()
+    window.load_pdf(src1)
+    _show_window(window, qapp)
+
+    window.preview_mode_single_button.click()
+    qapp.processEvents()
+    assert window.preview._state is not None
+    assert window.preview._state.mode == PreviewMode.SINGLE_PAGE
+
+    window.load_pdf(src2)
+    qapp.processEvents()
+    assert window.preview_mode_facing_button.isChecked() is True
+    assert window.preview_mode_single_button.isChecked() is False
+    assert window.preview._state is not None
+    assert window.preview._state.mode == PreviewMode.FACING_PAGES
+    assert window.preview._state.pages[0].is_placeholder is True
+    assert window.preview._state.pages[1].title_text.startswith("Source page 1")
+    assert "Right / Odd" in window.preview._state.pages[1].title_text
     window.close()
 
 
@@ -128,9 +167,10 @@ def test_preview_header_buttons_and_labels_are_concise(tmp_path, qapp):
     assert window.preview_mode_facing_button.text() == "Facing Pages"
     assert window.preview_mode_single_button.icon().isNull() is False
     assert window.preview_mode_facing_button.icon().isNull() is False
-    assert window.preview_mode_single_button.isChecked() is True
-    assert window.preview_mode_facing_button.isChecked() is False
+    assert window.preview_mode_single_button.isChecked() is False
+    assert window.preview_mode_facing_button.isChecked() is True
     assert window.preview._state is not None
+    assert window.preview._state.mode == PreviewMode.FACING_PAGES
     assert window.preview._state.indicator_text == ""
     assert "Shows the original unshifted page position as a red dashed outline." in window.show_original_check.toolTip()
     header_texts = [widget.text() for widget in window.preview.findChildren(QtWidgets.QLabel)]
@@ -139,15 +179,27 @@ def test_preview_header_buttons_and_labels_are_concise(tmp_path, qapp):
 
     window.page_spin.setValue(2)
     qapp.processEvents()
-    assert window.preview._state.pages[0].title_text == "Source page 2 — Left / Even"
-    assert "Output" not in window.preview._state.pages[0].title_text
+    current_text = window.preview._state.pages[0].title_text
+    assert current_text.startswith("Source page 2")
+    assert "Left / Even" in current_text
+    assert "Output" not in current_text
+
+    window.page_spin.setValue(1)
+    qapp.processEvents()
+    assert window.preview._state.pages[0].is_placeholder is True
+    assert window.preview._state.pages[0].title_text == "No facing page"
+    assert window.preview._state.pages[1].title_text.startswith("Source page 1")
+    assert "Right / Odd" in window.preview._state.pages[1].title_text
+
     window.page_spin.setValue(2)
     window.insert_blank_before_current_page()
     qapp.processEvents()
     window._set_active_output_position(2)
     qapp.processEvents()
-    assert window.preview._state.pages[0].title_text == "Inserted blank — Left / Even"
-    assert "Output" not in window.preview._state.pages[0].title_text
+    blank_text = window.preview._state.pages[0].title_text
+    assert blank_text.startswith("Inserted blank")
+    assert "Left / Even" in blank_text
+    assert "Output" not in blank_text
     window.close()
 
 
@@ -188,7 +240,7 @@ def test_preview_keyboard_navigation_respects_focus_and_modes(tmp_path, qapp):
 
     QtTest.QTest.keyClick(window, QtCore.Qt.Key.Key_PageDown)
     qapp.processEvents()
-    assert window.page_spin.value() == 3
+    assert window.page_spin.value() == 4
 
     QtTest.QTest.keyClick(window, QtCore.Qt.Key.Key_Home)
     qapp.processEvents()

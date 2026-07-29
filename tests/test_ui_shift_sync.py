@@ -44,12 +44,16 @@ def test_unequal_shifts_are_passed_into_preview_geometry(tmp_path, qapp):
     odd_state = window.preview._state
     assert odd_state is not None
     odd_page = odd_state.pages[0]
+    assert odd_page.page_side is not None
+    assert odd_page.page_side.label == "Left / Even"
     assert odd_page.target_rect.x0 < odd_page.page_rect.x0
 
     window.page_spin.setValue(2)
     window.refresh_preview()
     even_state = window.preview._state
     assert even_state is not None
-    even_page = even_state.pages[0]
+    even_page = even_state.pages[1]
+    assert even_page.page_side is not None
+    assert even_page.page_side.label == "Right / Odd"
     assert even_page.target_rect.x0 > even_page.page_rect.x0
     window.close()

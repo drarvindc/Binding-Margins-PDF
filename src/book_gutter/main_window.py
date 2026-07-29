@@ -394,7 +394,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preview.page_clicked.connect(self._set_active_source_page)
 
         self._sync_shift_controls(self.same_shift_check.isChecked())
-        self._set_preview_mode(PreviewMode.SINGLE_PAGE)
+        self._set_preview_mode(PreviewMode.FACING_PAGES)
 
     def _sync_shift_controls(self, same: bool) -> None:
         self.even_shift_spin.setEnabled(not same)
@@ -641,6 +641,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.first_page_side_combo.setCurrentIndex(0)
         self._composition = self._pdf.compose(self._layout)
         self._active_output_position = 1
+        self._set_preview_mode(PreviewMode.FACING_PAGES)
         self.page_spin.setEnabled(True)
         self.page_spin.setMaximum(info.page_count)
         self.page_spin.setValue(1)
