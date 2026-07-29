@@ -8,7 +8,7 @@ import fitz
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from .page_side import PageSide
-from .pdf_transform import BindingSide, target_rect_for_page
+from .pdf_transform import BindingSide
 
 
 class PreviewMode(str, Enum):
@@ -48,6 +48,12 @@ class PreviewHitRegion:
     page_number: int | None
     rect: QtCore.QRectF
     is_placeholder: bool
+
+
+@dataclass(frozen=True)
+class PreviewOverlayRects:
+    current_rect: fitz.Rect
+    original_rect: fitz.Rect
 
 
 @dataclass(frozen=True)
@@ -161,17 +167,20 @@ class PagePreviewWidget(QtWidgets.QWidget):
             painter.setPen(QtGui.QPen(QtGui.QColor("#d2ccc1"), 1))
             painter.drawRoundedRect(rect, 6.0, 6.0)
 
-        if page.page_number == state.active_page_number:
-            painter.setPen(QtGui.QPen(QtGui.QColor("#2f6df6"), 3))
-        else:
-            painter.setPen(QtGui.QPen(QtGui.QColor("#4f4f4f" if page.is_placeholder else "#3c3c3c"), 1.5))
+        painter.setPen(QtGui.QPen(QtGui.QColor("#4f4f4f" if page.is_placeholder else "#3c3c3c"), 1.25))
         painter.drawRoundedRect(rect, 6.0, 6.0)
 
-        if not page.is_placeholder and state.show_original_position and page.page_index is not None:
-            painter.setPen(QtGui.QPen(QtGui.QColor("#d13b3b"), 2, QtCore.Qt.PenStyle.DashLine))
-            if page.page_side is not None:
-                original_rect = target_rect_for_page(page.page_rect, state.scale, 0.0, page.page_side, state.binding_side)
-                painter.drawRoundedRect(self._map_source_rect(page.page_rect, rect, original_rect).adjusted(-1.0, -1.0, 1.0, 1.0), 4.0, 4.0)
+        if not page.is_placeholder and page.page_index is not None and page.target_rect is not None:
+            overlays = preview_overlay_rects(page.page_rect, page.target_rect)
+            painter.setPen(QtGui.QPen(QtGui.QColor("#2f6df6"), 2.5))
+            painter.drawRoundedRect(self._map_source_rect(page.page_rect, rect, overlays.current_rect), 4.0, 4.0)
+            if state.show_original_position and page.page_side is not None:
+                painter.setPen(QtGui.QPen(QtGui.QColor("#d13b3b"), 2, QtCore.Qt.PenStyle.DashLine))
+                painter.drawRoundedRect(
+                    self._map_source_rect(page.page_rect, rect, overlays.original_rect).adjusted(-1.0, -1.0, 1.0, 1.0),
+                    4.0,
+                    4.0,
+                )
 
         self._draw_caption(painter, entry, page, page.page_number == state.active_page_number)
 
@@ -324,3 +333,16 @@ class PagePreviewWidget(QtWidgets.QWidget):
             QtGui.QImage.Format.Format_RGB888,
         )
         return QtGui.QPixmap.fromImage(image.copy())
+
+
+def preview_overlay_rects(page_rect: fitz.Rect, current_rect: fitz.Rect) -> PreviewOverlayRects:
+    page_center_x = page_rect.x0 + page_rect.width / 2.0
+    current_center_x = current_rect.x0 + current_rect.width / 2.0
+    shift_x = current_center_x - page_center_x
+    original_rect = fitz.Rect(
+        current_rect.x0 - shift_x,
+        current_rect.y0,
+        current_rect.x1 - shift_x,
+        current_rect.y1,
+    )
+    return PreviewOverlayRects(current_rect=fitz.Rect(current_rect), original_rect=original_rect)

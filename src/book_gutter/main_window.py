@@ -207,6 +207,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.show_binding_space_check = QtWidgets.QCheckBox("Show binding space")
         self.show_binding_space_check.setChecked(True)
         self.show_original_check = QtWidgets.QCheckBox("Show original position")
+        self.show_original_check.setToolTip(
+            "Shows the original unshifted page position as a red dashed outline. "
+            "The shifted/current position is shown in blue."
+        )
 
         self.insert_blank_before_button = QtWidgets.QPushButton("Add blank before current page")
         self.insert_blank_after_button = QtWidgets.QPushButton("Add blank after current page")
@@ -248,9 +252,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preview_location_label.setObjectName("previewLocationLabel")
         self.preview_location_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.preview_location_label.setStyleSheet("color: #5f5a52; font-weight: 600;")
-        self.original_position_legend_label = QtWidgets.QLabel("Blue = shifted/current   Red dashed = original position")
-        self.original_position_legend_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.original_position_legend_label.setStyleSheet("color: #7c7467; font-size: 11px;")
         self.prev_button.setToolTip("Previous page or spread.\nShortcut: Left Arrow or Page Up.")
         self.next_button.setToolTip("Next page or spread.\nShortcut: Right Arrow or Page Down.")
         self.page_spin.setToolTip("Jump to a source page. Keyboard shortcuts: Home and End.")
@@ -358,7 +359,6 @@ class MainWindow(QtWidgets.QMainWindow):
         preview_footer.addStretch(1)
 
         preview_panel_layout.addLayout(preview_header)
-        preview_panel_layout.addWidget(self.original_position_legend_label)
         preview_panel_layout.addWidget(self.preview, 1)
         preview_panel_layout.addLayout(preview_footer)
 
@@ -395,7 +395,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._sync_shift_controls(self.same_shift_check.isChecked())
         self._set_preview_mode(PreviewMode.SINGLE_PAGE)
-        self.original_position_legend_label.setVisible(False)
 
     def _sync_shift_controls(self, same: bool) -> None:
         self.even_shift_spin.setEnabled(not same)
@@ -790,7 +789,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self._set_status("")
             self.blank_list.clear()
             self._update_blank_controls()
-            self.original_position_legend_label.setVisible(False)
             return
 
         composition = self._compose_layout()
@@ -799,7 +797,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.preview_location_label.setText("-")
             self._set_status("")
             self._update_blank_controls()
-            self.original_position_legend_label.setVisible(False)
             return
 
         self._active_output_position = max(1, min(self._active_output_position, len(composition.items)))
@@ -904,7 +901,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.shift_direction_label.setText(f"Shift direction: {shift_direction}")
         self.scale_label.setText(f"Scale: {format_pct(self.scale_spin.value(), 1)}")
         self._set_status(warning_text or "", warning_error)
-        self.original_position_legend_label.setVisible(self.show_original_check.isChecked() and any(page.page_index is not None for page in pages))
 
         state = PreviewState(
             mode=mode,

@@ -4,7 +4,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import fitz
-from PySide6 import QtCore, QtTest
+from PySide6 import QtCore, QtTest, QtWidgets
 
 from book_gutter.main_window import MainWindow
 from book_gutter.preview_widget import PreviewMode
@@ -132,16 +132,15 @@ def test_preview_header_buttons_and_labels_are_concise(tmp_path, qapp):
     assert window.preview_mode_facing_button.isChecked() is False
     assert window.preview._state is not None
     assert window.preview._state.indicator_text == ""
-    assert window.original_position_legend_label.isHidden() is True
+    assert "Shows the original unshifted page position as a red dashed outline." in window.show_original_check.toolTip()
+    header_texts = [widget.text() for widget in window.preview.findChildren(QtWidgets.QLabel)]
+    assert all("Blue = shifted/current" not in text for text in header_texts)
+    assert all("Red dashed = original position" not in text for text in header_texts)
 
     window.page_spin.setValue(2)
     qapp.processEvents()
     assert window.preview._state.pages[0].title_text == "Source page 2 — Left / Even"
     assert "Output" not in window.preview._state.pages[0].title_text
-    window.show_original_check.setChecked(True)
-    qapp.processEvents()
-    assert window.original_position_legend_label.isHidden() is False
-
     window.page_spin.setValue(2)
     window.insert_blank_before_current_page()
     qapp.processEvents()
