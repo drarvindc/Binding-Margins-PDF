@@ -1,6 +1,6 @@
-# Contributing to Book Gutter PDF
+# Contributing to Binding Margins PDF
 
-Thanks for helping improve Book Gutter PDF.
+Thanks for helping improve Binding Margins PDF.
 
 ## Before you open a change
 

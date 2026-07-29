@@ -1,14 +1,18 @@
-# Book Gutter PDF
+# Binding Margins PDF
+
+<p align="center">
+  <img src="docs/images/logo_transparent.png" alt="Binding Margins PDF logo" width="280">
+</p>
 
 Prepare ordinary PDFs for duplex printing and side binding without shrinking the text unnecessarily.
 
-Book Gutter PDF is a Windows desktop utility for preparing books, manuals, zines, and similar side-bound documents. It creates mirrored binding margins, shifts odd and even pages independently, supports facing-pages preview, lets you insert intentional blank pages, and produces both print-ready and test PDFs. It is intended for home printing, stapling, tape binding, and related workflows where a book is bound on one side.
+Binding Margins PDF is a Windows desktop utility for preparing books, manuals, zines, and similar side-bound documents. It creates mirrored binding margins, shifts odd and even pages independently, supports facing-pages preview, lets you insert intentional blank pages, and produces both print-ready and test PDFs. It is intended for home printing, stapling, tape binding, and related workflows where a book is bound on one side.
 
 This is not booklet imposition software. It does not rearrange pages into folded signatures or place multiple pages on one sheet.
 
 ## Preview
 
-<!-- Add application screenshot at docs/images/book-gutter-preview.png -->
+![Before and after binding margins card](docs/images/before_after_card.png)
 
 The preview should show the default Facing Pages view, Single Page preview, independent odd/even binding shifts, and the binding-space visualization.
 
@@ -20,7 +24,9 @@ Shifting every page the same way is not correct for duplex printing. Odd/right p
 
 Front matter and inserted blank pages can also change which side the next page occupies. That means page-side alignment has to follow the composed document sequence, not just the original page number.
 
-Booklet tools solve a different problem. They reorder pages into signatures for folding. Book Gutter PDF keeps the original page order and applies mirrored gutter shifting instead.
+![Before and after binding margins illustration](docs/images/before_after_illustration.png)
+
+Booklet tools solve a different problem. They reorder pages into signatures for folding. Binding Margins PDF keeps the original page order and applies mirrored gutter shifting instead.
 
 ## Features
 
@@ -197,7 +203,7 @@ Facing Pages preview does not reorder full PDF export.
 
 ## Installation and launch
 
-Book Gutter PDF is meant to run from a project-local `.venv` on Windows.
+Binding Margins PDF is meant to run from a project-local `.venv` on Windows.
 
 ### First-time setup
 
