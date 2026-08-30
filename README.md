@@ -10,11 +10,36 @@ Binding Margins PDF is a Windows desktop utility for preparing books, manuals, z
 
 This is not booklet imposition software. It does not rearrange pages into folded signatures or place multiple pages on one sheet.
 
+## Binding margins before printing
+
+![Binding margins PDF guide showing how inner binding space moves content away from the spine](docs/images/binding_margins_before_printing_guide.png)
+
+## Before and after binding-margin correction
+
+### Before correction (0.00 mm)
+
+![Facing-pages preview before adding a gutter margin](docs/images/book_gutter_pdf_before_facing_pages_0mm.png)
+
+Facing-pages preview with no added binding margin. Content sits close to the inner gutter near the spine.
+
+### After correction (15.00 mm)
+
+![Facing-pages preview after adding 15 mm of book gutter space](docs/images/book_gutter_pdf_after_facing_pages_15mm.png)
+
+Facing-pages preview after adding a 15 mm binding margin. The content is pushed away from the spine to create safer readable space for binding.
+
+## How it works
+
+- Binding margin is added on the inside edge used for binding.
+- The content block is shifted away from the spine.
+- On facing pages, even and odd pages move in opposite directions because the binding edge alternates.
+- The result is a print-ready PDF with more practical inner margin and PDF binding space.
+
 ## Preview
 
-![Before and after binding margins card](docs/images/before_after_card.png)
+The preview shows the default Facing Pages view, Single Page preview, independent odd/even binding shifts, and the binding-space visualization.
 
-The preview should show the default Facing Pages view, Single Page preview, independent odd/even binding shifts, and the binding-space visualization.
+The tool is designed to add a gutter margin before printing without shrinking the text unnecessarily.
 
 ## Why this project exists
 
@@ -23,8 +48,6 @@ Normal PDFs usually assume equal left and right margins. Side binding changes th
 Shifting every page the same way is not correct for duplex printing. Odd/right pages and even/left pages need mirrored movement, and some documents need different odd-page and even-page shift values.
 
 Front matter and inserted blank pages can also change which side the next page occupies. That means page-side alignment has to follow the composed document sequence, not just the original page number.
-
-![Before and after binding margins illustration](docs/images/before_after_illustration.png)
 
 Booklet tools solve a different problem. They reorder pages into signatures for folding. Binding Margins PDF keeps the original page order and applies mirrored gutter shifting instead.
 
