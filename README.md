@@ -141,7 +141,7 @@ Issues and pull requests are welcome. Please include reproduction steps, platfor
 
 ## License
 
-A project license has not yet been selected. Until a license is added, normal copyright restrictions apply.
+This project is licensed under the [MIT License](LICENSE).
 
 ## Built with
 
